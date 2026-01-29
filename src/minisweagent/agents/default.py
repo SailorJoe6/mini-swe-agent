@@ -1,8 +1,10 @@
 """Basic agent class. See https://mini-swe-agent.com/latest/advanced/control_flow/ for visual explanation."""
 
+import json
 import re
 import subprocess
 import time
+from pathlib import Path
 
 from jinja2 import StrictUndefined, Template
 from pydantic import BaseModel
@@ -53,6 +55,20 @@ class DefaultAgent:
         self.model = model
         self.env = env
         self.extra_template_vars = {}
+        self._live_traj_path: Path | None = None
+
+    def set_live_trajectory_path(self, path: Path | str | None):
+        """Set the path for live trajectory streaming (JSONL format).
+
+        When set, each message will be appended to this file as it's added,
+        allowing real-time monitoring of the agent's thoughts and actions.
+        Use: tail -f <path> | jq .
+        """
+        self._live_traj_path = Path(path) if path else None
+        if self._live_traj_path:
+            # Ensure parent directory exists and clear any existing file
+            self._live_traj_path.parent.mkdir(parents=True, exist_ok=True)
+            self._live_traj_path.unlink(missing_ok=True)
 
     def render_template(self, template: str, **kwargs) -> str:
         template_vars = self.config.model_dump() | self.env.get_template_vars() | self.model.get_template_vars()
@@ -61,7 +77,16 @@ class DefaultAgent:
         )
 
     def add_message(self, role: str, content: str, **kwargs):
-        self.messages.append({"role": role, "content": content, "timestamp": time.time(), **kwargs})
+        message = {"role": role, "content": content, "timestamp": time.time(), **kwargs}
+        self.messages.append(message)
+
+        # Stream to live trajectory file if configured
+        if self._live_traj_path:
+            try:
+                with open(self._live_traj_path, 'a') as f:
+                    f.write(json.dumps(message) + '\n')
+            except Exception:
+                pass  # Don't let streaming failures break the agent
 
     def run(self, task: str, **kwargs) -> tuple[str, str]:
         """Run step() until agent is finished. Return exit status & message"""

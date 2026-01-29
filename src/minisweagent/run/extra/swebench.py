@@ -150,6 +150,9 @@ def process_instance(
             instance_id=instance_id,
             **config.get("agent", {}),
         )
+        # Enable live trajectory streaming for real-time monitoring
+        # Use: tail -f <instance_dir>/<instance_id>.traj.jsonl | jq .
+        agent.set_live_trajectory_path(instance_dir / f"{instance_id}.traj.jsonl")
         exit_status, result = agent.run(task)
     except Exception as e:
         logger.error(f"Error processing instance {instance_id}: {e}", exc_info=True)

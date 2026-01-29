@@ -1,9 +1,12 @@
 import json
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from minisweagent import Agent, __version__
+
+logger = logging.getLogger(__name__)
 
 
 def _get_class_name_with_module(obj: Any) -> str:
@@ -68,3 +71,13 @@ def save_traj(
     path.write_text(json.dumps(data, indent=2))
     if print_path:
         print_fct(f"Saved trajectory to '{path}'")
+
+    # Clean up live trajectory JSONL file if it exists
+    # Note: path is like "instance_id.traj.json", we want "instance_id.traj.jsonl"
+    live_traj_path = path.with_suffix('').with_suffix('.traj.jsonl')
+    if live_traj_path.exists():
+        try:
+            live_traj_path.unlink()
+            logger.debug(f"Cleaned up live trajectory file: {live_traj_path}")
+        except Exception as e:
+            logger.warning(f"Failed to clean up live trajectory file {live_traj_path}: {e}")
