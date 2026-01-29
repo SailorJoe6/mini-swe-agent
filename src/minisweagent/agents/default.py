@@ -119,8 +119,54 @@ class DefaultAgent:
         """Execute the action and return the observation."""
         output = self.execute_action(self.parse_action(response))
         observation = self.render_template(self.config.action_observation_template, output=output)
+
+        # Add step limit warnings
+        observation = self._add_step_limit_warning(observation)
+
         self.add_message("user", observation)
         return output
+
+    def _add_step_limit_warning(self, observation: str) -> str:
+        """Add warnings when approaching step limit."""
+        if self.config.step_limit <= 0:
+            return observation
+
+        steps_used = self.model.n_calls
+        steps_remaining = self.config.step_limit - steps_used
+        usage_percent = steps_used / self.config.step_limit
+
+        if steps_remaining == 1:
+            # Final step warning
+            warning = """
+<URGENT_WARNING>
+⚠️ THIS IS YOUR FINAL STEP! You have used {used}/{limit} steps.
+
+You MUST submit your solution NOW. Run:
+```bash
+echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git diff --cached
+```
+
+If you have not staged your changes yet, you will lose all your work.
+If you have unstaged changes, run `git add -A` first (this step), then submit on your next (final) step.
+</URGENT_WARNING>
+""".format(used=steps_used, limit=self.config.step_limit)
+            return observation + warning
+
+        elif usage_percent >= 0.9:
+            # 90% warning
+            warning = """
+<WARNING>
+⏰ RUNNING LOW ON STEPS: You have used {used}/{limit} steps ({remaining} remaining).
+
+You should wrap up your work soon and submit your solution.
+Remember the two-step submission process:
+1. Stage changes: `git add -A` (review output for errors)
+2. Submit: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git diff --cached`
+</WARNING>
+""".format(used=steps_used, limit=self.config.step_limit, remaining=steps_remaining)
+            return observation + warning
+
+        return observation
 
     def parse_action(self, response: dict) -> dict:
         """Parse the action from the message. Returns the action."""
