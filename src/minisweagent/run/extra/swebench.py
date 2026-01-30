@@ -68,7 +68,8 @@ class ProgressTrackingAgent(DefaultAgent):
 
 def get_swebench_docker_image_name(instance: dict) -> str:
     """Get the image name for a SWEBench instance."""
-    image_name = instance.get("image_name", None)
+    # Check for image_name (original SWE-bench) or docker_image (SWE-bench-Live/MultiLang)
+    image_name = instance.get("image_name") or instance.get("docker_image")
     if image_name is None:
         # Docker doesn't allow double underscore, so we replace them with a magic token
         iid = instance["instance_id"]
