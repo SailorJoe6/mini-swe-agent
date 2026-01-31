@@ -2,6 +2,8 @@ import json
 import tempfile
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from minisweagent.agents.default import DefaultAgent
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models.test_models import DeterministicModel
@@ -80,3 +82,46 @@ def test_save_traj_with_none_agent():
 
         # Verify config is not present when agent is None
         assert "config" not in saved_data["info"]
+
+
+def test_save_traj_includes_context_left_percent():
+    class UsageModelConfig(BaseModel):
+        model_name: str = "deterministic"
+
+    class UsageModel:
+        def __init__(self):
+            self.config = UsageModelConfig()
+            self.cost = 0.0
+            self.n_calls = 0
+
+        def query(self, messages, **kwargs):
+            self.n_calls += 1
+            return {
+                "content": "Do it\n```bash\necho 'ok'\n```",
+                "extra": {
+                    "response": {
+                        "usage": {"prompt_tokens": 4000, "completion_tokens": 1, "total_tokens": 4500}
+                    }
+                },
+            }
+
+        def get_template_vars(self):
+            return {"model_name": "deterministic", "n_model_calls": self.n_calls, "model_cost": self.cost}
+
+    import yaml
+
+    config_path = Path("src/minisweagent/config/default.yaml")
+    with open(config_path) as f:
+        default_config = yaml.safe_load(f)["agent"]
+
+    agent = DefaultAgent(UsageModel(), LocalEnvironment(), **default_config)
+    agent.context_window_max = 8000
+    agent.messages = [{"role": "system", "content": "system"}, {"role": "user", "content": "hi"}]
+    agent.query()
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir) / "test_trajectory.json"
+        save_traj(agent, temp_path, exit_status="Submitted", result="ok", print_path=False)
+
+        saved_data = json.loads(temp_path.read_text())
+        assert saved_data["messages"][-1]["context_left_percent"] == 50

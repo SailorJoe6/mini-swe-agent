@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -116,6 +117,40 @@ def test_help_command(default_config):
             # Check that help was printed
             help_calls = [call for call in mock_print.call_args_list if "/y" in str(call)]
             assert len(help_calls) > 0
+
+
+def test_header_includes_context_left(default_config):
+    """Ensure interactive header shows context-left percent when available."""
+
+    class UsageModel:
+        def __init__(self):
+            self.config = SimpleNamespace(model_name="deterministic")
+            self.cost = 0.0
+            self.n_calls = 0
+
+        def query(self, messages, **kwargs):
+            self.n_calls += 1
+            return {
+                "content": "Do it\n```bash\necho 'ok'\n```",
+                "extra": {
+                    "response": {
+                        "usage": {"prompt_tokens": 4000, "completion_tokens": 1, "total_tokens": 4001}
+                    }
+                },
+            }
+
+        def get_template_vars(self):
+            return {"model_name": "deterministic", "n_model_calls": self.n_calls, "model_cost": self.cost}
+
+    agent = InteractiveAgent(model=UsageModel(), env=LocalEnvironment(), **default_config)
+    agent.context_window_max = 8000
+    agent.messages = [{"role": "system", "content": "system"}, {"role": "user", "content": "hi"}]
+
+    with patch("minisweagent.agents.interactive.console.print") as mock_print:
+        agent.query()
+
+    header_calls = [call for call in mock_print.call_args_list if "context left" in str(call)]
+    assert any("50% context left" in str(call) for call in header_calls)
 
 
 def test_whitelisted_actions_skip_confirmation(default_config):

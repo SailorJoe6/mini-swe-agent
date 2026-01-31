@@ -106,6 +106,19 @@ async def test_everything_integration_test(default_config):
         print(">>> Confirm directly with enter first and we move on to page 3")
         print(get_screen_text(app))
         await pilot.press("enter")
+
+
+async def test_title_includes_context_left(default_config):
+    app = TextualAgent(
+        model=DeterministicModel(outputs=["Step\n```bash\necho 'ok'\n```"]),
+        env=LocalEnvironment(),
+        **default_config,
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause(0)
+        app.agent.context_left_percent = 42
+        app._update_headers()
+        assert "42% context left" in app.title
         await pilot.pause(0.5)
         print("---")
         print(get_screen_text(app))

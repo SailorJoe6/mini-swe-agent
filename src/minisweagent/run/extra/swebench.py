@@ -61,10 +61,14 @@ class ProgressTrackingAgent(DefaultAgent):
 
     def step(self) -> dict:
         """Override step to provide progress updates."""
+        result = super().step()
+        context_left = ""
+        if self.context_left_percent is not None:
+            context_left = f", {self.context_left_percent}% context left"
         self.progress_manager.update_instance_status(
-            self.instance_id, f"Step {self.model.n_calls + 1:3d} (${self.model.cost:.2f})"
+            self.instance_id, f"Step {self.model.n_calls:3d} (${self.model.cost:.2f}{context_left})"
         )
-        return super().step()
+        return result
 
 
 def get_swebench_docker_image_name(instance: dict) -> str:

@@ -45,8 +45,11 @@ class InteractiveAgent(DefaultAgent):
         # Extend supermethod to print messages
         super().add_message(role, content, **kwargs)
         if role == "assistant":
+            context_left = ""
+            if self.context_left_percent is not None:
+                context_left = f", [bold]{self.context_left_percent}% context left[/bold]"
             console.print(
-                f"\n[red][bold]mini-swe-agent[/bold] (step [bold]{self.model.n_calls}[/bold], [bold]${self.model.cost:.2f}[/bold]):[/red]\n",
+                f"\n[red][bold]mini-swe-agent[/bold] (step [bold]{self.model.n_calls}[/bold], [bold]${self.model.cost:.2f}[/bold]{context_left}):[/red]\n",
                 end="",
                 highlight=False,
             )

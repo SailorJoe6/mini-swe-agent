@@ -1,13 +1,16 @@
 import json
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from pydantic import BaseModel
 
 from minisweagent import package_dir
+from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models.test_models import DeterministicModel
 from minisweagent.run.extra.swebench import (
+    ProgressTrackingAgent,
     filter_instances,
     get_swebench_docker_image_name,
     main,
@@ -492,3 +495,41 @@ def test_exception_handling_with_progress_manager(tmp_path):
 
             # on_uncaught_exception should not be called since exceptions are handled properly
             mock_progress_manager.on_uncaught_exception.assert_not_called()
+
+
+def test_progress_status_includes_context_left(tmp_path):
+    class UsageModel:
+        def __init__(self):
+            self.config = SimpleNamespace(model_name="deterministic")
+            self.cost = 0.0
+            self.n_calls = 0
+
+        def query(self, messages, **kwargs):
+            self.n_calls += 1
+            return {
+                "content": "Do it\n```bash\necho 'ok'\n```",
+                "extra": {
+                    "response": {
+                        "usage": {"prompt_tokens": 50, "completion_tokens": 1, "total_tokens": 55}
+                    }
+                },
+            }
+
+        def get_template_vars(self) -> dict[str, Any]:
+            return {"model_name": "deterministic", "n_model_calls": self.n_calls, "model_cost": self.cost}
+
+    progress_manager = Mock()
+    agent = ProgressTrackingAgent(
+        model=UsageModel(),
+        env=LocalEnvironment(),
+        progress_manager=progress_manager,
+        instance_id="instance-1",
+    )
+    agent.context_window_max = 100
+    agent.messages = [{"role": "system", "content": "system"}, {"role": "user", "content": "hi"}]
+
+    agent.step()
+
+    args, _ = progress_manager.update_instance_status.call_args
+    assert args[0] == "instance-1"
+    assert "50% context left" in args[1]
