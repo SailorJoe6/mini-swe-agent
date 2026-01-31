@@ -34,6 +34,8 @@ class LitellmModelConfig(BaseModel):
     """Use streaming mode to avoid HTTP read timeouts on long generations. Default: true.
     When enabled, responses are streamed token-by-token, keeping the connection alive.
     This prevents timeout errors when vLLM takes >10 minutes to generate a response."""
+    stream_include_usage: bool = os.getenv("MSWEA_STREAM_INCLUDE_USAGE", "false").lower() == "true"
+    """Request usage stats in streaming responses when supported by the backend."""
 
 
 class LitellmModel:
@@ -52,13 +54,32 @@ class LitellmModel:
         """
         content_parts = []
         last_chunk = None
+        usage = None
 
         for chunk in stream_response:
             last_chunk = chunk
             if chunk.choices and chunk.choices[0].delta.content:
                 content_parts.append(chunk.choices[0].delta.content)
+            chunk_usage = None
+            if isinstance(chunk, dict):
+                chunk_usage = chunk.get("usage")
+            else:
+                chunk_usage = getattr(chunk, "usage", None)
+            if chunk_usage:
+                usage = chunk_usage
 
         content = "".join(content_parts)
+
+        usage_obj = None
+        if usage:
+            if isinstance(usage, Usage):
+                usage_obj = usage
+            elif isinstance(usage, dict):
+                usage_obj = Usage(
+                    prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
+                    completion_tokens=int(usage.get("completion_tokens", 0) or 0),
+                    total_tokens=int(usage.get("total_tokens", 0) or 0),
+                )
 
         # Reconstruct a ModelResponse compatible with non-streaming code
         return ModelResponse(
@@ -70,8 +91,9 @@ class LitellmModel:
                 finish_reason="stop",
                 message=Message(role="assistant", content=content),
             )],
-            # Usage stats not available in streaming; use estimates
-            usage=Usage(
+            # Use backend-provided usage if available, otherwise use estimates
+            usage=usage_obj
+            or Usage(
                 prompt_tokens=0,
                 completion_tokens=len(content_parts),
                 total_tokens=len(content_parts),
@@ -99,11 +121,14 @@ class LitellmModel:
         try:
             if self.config.use_streaming:
                 # Use streaming to avoid HTTP read timeouts on long generations
+                stream_kwargs = {}
+                if self.config.stream_include_usage:
+                    stream_kwargs["stream_options"] = {"include_usage": True}
                 stream_response = litellm.completion(
                     model=self.config.model_name,
                     messages=messages,
                     stream=True,
-                    **(self.config.model_kwargs | kwargs)
+                    **(self.config.model_kwargs | kwargs | stream_kwargs)
                 )
                 return self._reconstruct_response_from_stream(stream_response)
             else:

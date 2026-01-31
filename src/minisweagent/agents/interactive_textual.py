@@ -41,6 +41,10 @@ class _TextualAgent(DefaultAgent):
         self.app = app
         super().__init__(*args, config_class=TextualAgentConfig, **kwargs)
         self._current_action_from_human = False
+        self.context_window_mode = "interactive"
+
+    def prompt_user(self, prompt: str) -> str:
+        return self.app.input_container.request_input(prompt)
 
     def add_message(self, role: str, content: str, **kwargs):
         super().add_message(role, content, **kwargs)

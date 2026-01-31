@@ -57,6 +57,7 @@ class ProgressTrackingAgent(DefaultAgent):
         super().__init__(*args, **kwargs)
         self.progress_manager: RunBatchProgressManager = progress_manager
         self.instance_id = instance_id
+        self.context_window_mode = "batch"
 
     def step(self) -> dict:
         """Override step to provide progress updates."""

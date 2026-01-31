@@ -92,3 +92,23 @@ def lookup_context_window(model_name: str, context_map: dict[str, int]) -> int |
             best_key = key
 
     return normalized_map.get(best_key) if best_key else None
+
+
+def save_context_window_map(context_map: dict[str, int], config_dir: Path | None = None) -> Path:
+    """Persist the context window map to the live config file."""
+    live_path = ensure_live_context_window_map(config_dir)
+    sanitized: dict[str, int] = {}
+    for key, value in context_map.items():
+        if key is None:
+            continue
+        sanitized[str(key)] = int(value)
+    live_path.write_text(yaml.safe_dump(sanitized, sort_keys=True))
+    return live_path
+
+
+def update_context_window_map(model_name: str, max_tokens: int, config_dir: Path | None = None) -> Path:
+    """Update the live context window map with a resolved token limit."""
+    context_map = load_context_window_map(config_dir)
+    normalized_name = normalize_model_name(model_name)
+    context_map[normalized_name] = int(max_tokens)
+    return save_context_window_map(context_map, config_dir)

@@ -37,6 +37,27 @@ def test_successful_completion(default_config):
     assert len(agent.messages) == 6  # system, user, assistant, user, assistant, user
 
 
+def test_pre_lifecycle_sets_context_window(default_config, tmp_path, monkeypatch):
+    from minisweagent.models import context_window as cw
+
+    monkeypatch.setattr(cw, "global_config_dir", tmp_path)
+
+    agent = DefaultAgent(
+        model=DeterministicModel(
+            outputs=[
+                "I'll echo a message\n```bash\necho 'hello world'\n```",
+                "Now finishing\n```bash\necho 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\necho 'Task completed successfully'\n```",
+            ]
+        ),
+        env=LocalEnvironment(),
+        **default_config,
+    )
+
+    exit_status, _ = agent.run("Echo hello world then finish")
+    assert exit_status == "Submitted"
+    assert agent.context_window_max == 8192
+
+
 def test_step_limit_enforcement(default_config):
     """Test agent stops when step limit is reached."""
     agent = DefaultAgent(

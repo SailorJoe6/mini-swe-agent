@@ -36,6 +36,10 @@ class InteractiveAgent(DefaultAgent):
     def __init__(self, *args, config_class=InteractiveAgentConfig, **kwargs):
         super().__init__(*args, config_class=config_class, **kwargs)
         self.cost_last_confirmed = 0.0
+        self.context_window_mode = "interactive"
+
+    def prompt_user(self, prompt: str) -> str:
+        return self._prompt_and_handle_special("[bold yellow]>[/bold yellow] ")
 
     def add_message(self, role: str, content: str, **kwargs):
         # Extend supermethod to print messages
