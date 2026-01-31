@@ -65,6 +65,8 @@ class DefaultAgent:
         self.context_window_max: int | None = None
         self.context_window_source: str | None = None
         self.context_window_mode: str = "interactive"
+        self.context_left_percent: int | None = None
+        self.context_window_prompt_tokens: int | None = None
 
     def set_live_trajectory_path(self, path: Path | str | None):
         """Set the path for live trajectory streaming (JSONL format).
@@ -122,6 +124,7 @@ class DefaultAgent:
         if 0 < self.config.step_limit <= self.model.n_calls or 0 < self.config.cost_limit <= self.model.cost:
             raise LimitsExceeded()
         response = self.model.query(self.messages)
+        self._update_context_left(response)
         self.add_message("assistant", **response)
         return response
 
@@ -310,6 +313,40 @@ class DefaultAgent:
             f"Fetched {len(output)} characters from {url}.",
         )
         return snippet[:4000]
+
+    def _extract_prompt_tokens(self, response: dict) -> int | None:
+        extra = response.get("extra", {})
+        if not isinstance(extra, dict):
+            return None
+        response_payload = extra.get("response")
+        if not isinstance(response_payload, dict):
+            return None
+        usage = response_payload.get("usage")
+        if isinstance(usage, dict):
+            prompt_tokens = usage.get("prompt_tokens")
+        else:
+            prompt_tokens = getattr(usage, "prompt_tokens", None)
+        if prompt_tokens is None:
+            return None
+        try:
+            prompt_tokens_int = int(prompt_tokens)
+        except (TypeError, ValueError):
+            return None
+        return prompt_tokens_int if prompt_tokens_int > 0 else None
+
+    def _update_context_left(self, response: dict) -> None:
+        if not self.context_window_max:
+            return
+        prompt_tokens = self._extract_prompt_tokens(response)
+        if prompt_tokens is None:
+            return
+        max_tokens = int(self.context_window_max)
+        if max_tokens <= 0:
+            return
+        percent_left = max(0, 100 - int(100 * prompt_tokens / max_tokens))
+        self.context_window_prompt_tokens = prompt_tokens
+        self.context_left_percent = percent_left
+        response["context_left_percent"] = percent_left
 
     def get_observation(self, response: dict) -> dict:
         """Execute the action and return the observation."""

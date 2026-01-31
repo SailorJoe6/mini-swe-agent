@@ -30,11 +30,11 @@ class LitellmModelConfig(BaseModel):
     """Set explicit cache control markers, for example for Anthropic models"""
     cost_tracking: Literal["default", "ignore_errors"] = os.getenv("MSWEA_COST_TRACKING", "default")
     """Cost tracking mode for this model. Can be "default" or "ignore_errors" (ignore errors/missing cost info)"""
-    use_streaming: bool = os.getenv("MSWEA_USE_STREAMING", "true").lower() == "true"
-    """Use streaming mode to avoid HTTP read timeouts on long generations. Default: true.
+    use_streaming: bool = os.getenv("MSWEA_USE_STREAMING", "false").lower() == "true"
+    """Use streaming mode to avoid HTTP read timeouts on long generations. Default: false.
     When enabled, responses are streamed token-by-token, keeping the connection alive.
     This prevents timeout errors when vLLM takes >10 minutes to generate a response."""
-    stream_include_usage: bool = os.getenv("MSWEA_STREAM_INCLUDE_USAGE", "false").lower() == "true"
+    stream_include_usage: bool = os.getenv("MSWEA_STREAM_INCLUDE_USAGE", "true").lower() == "true"
     """Request usage stats in streaming responses when supported by the backend."""
 
 
@@ -45,6 +45,45 @@ class LitellmModel:
         self.n_calls = 0
         if self.config.litellm_model_registry and Path(self.config.litellm_model_registry).is_file():
             litellm.utils.register_model(json.loads(Path(self.config.litellm_model_registry).read_text()))
+
+    @staticmethod
+    def _usage_from_response(response) -> Usage | None:
+        if isinstance(response, dict):
+            usage = response.get("usage")
+        else:
+            usage = getattr(response, "usage", None)
+        if usage is None:
+            return None
+        if isinstance(usage, Usage):
+            return usage
+        if isinstance(usage, dict):
+            return Usage(
+                prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
+                completion_tokens=int(usage.get("completion_tokens", 0) or 0),
+                total_tokens=int(usage.get("total_tokens", 0) or 0),
+            )
+        prompt_tokens = getattr(usage, "prompt_tokens", None)
+        completion_tokens = getattr(usage, "completion_tokens", None)
+        total_tokens = getattr(usage, "total_tokens", None)
+        if prompt_tokens is None and completion_tokens is None and total_tokens is None:
+            return None
+        return Usage(
+            prompt_tokens=int(prompt_tokens or 0),
+            completion_tokens=int(completion_tokens or 0),
+            total_tokens=int(total_tokens or 0),
+        )
+
+    @staticmethod
+    def _usage_is_valid(usage: Usage | None) -> bool:
+        if usage is None:
+            return False
+        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+        total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+        if prompt_tokens <= 0:
+            return False
+        if total_tokens < prompt_tokens:
+            return False
+        return True
 
     def _reconstruct_response_from_stream(self, stream_response) -> ModelResponse:
         """Accumulate streaming chunks into a complete ModelResponse.
@@ -130,7 +169,15 @@ class LitellmModel:
                     stream=True,
                     **(self.config.model_kwargs | kwargs | stream_kwargs)
                 )
-                return self._reconstruct_response_from_stream(stream_response)
+                response = self._reconstruct_response_from_stream(stream_response)
+                usage = self._usage_from_response(response)
+                if not self._usage_is_valid(usage):
+                    return litellm.completion(
+                        model=self.config.model_name,
+                        messages=messages,
+                        **(self.config.model_kwargs | kwargs)
+                    )
+                return response
             else:
                 # Non-streaming mode (original behavior)
                 return litellm.completion(

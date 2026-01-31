@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -56,6 +57,49 @@ def test_pre_lifecycle_sets_context_window(default_config, tmp_path, monkeypatch
     exit_status, _ = agent.run("Echo hello world then finish")
     assert exit_status == "Submitted"
     assert agent.context_window_max == 8192
+
+
+def test_context_left_computation(default_config):
+    class UsageModel:
+        def __init__(self, prompt_tokens: int, total_tokens: int):
+            self.config = SimpleNamespace(model_name="deterministic")
+            self.prompt_tokens = prompt_tokens
+            self.total_tokens = total_tokens
+            self.cost = 0.0
+            self.n_calls = 0
+
+        def query(self, messages, **kwargs):
+            self.n_calls += 1
+            return {
+                "content": "ok",
+                "extra": {
+                    "response": {
+                        "usage": {
+                            "prompt_tokens": self.prompt_tokens,
+                            "completion_tokens": 1,
+                            "total_tokens": self.total_tokens,
+                        }
+                    }
+                },
+            }
+
+        def get_template_vars(self):
+            return {"model_name": "deterministic", "n_model_calls": self.n_calls, "model_cost": self.cost}
+
+    agent = DefaultAgent(
+        model=UsageModel(prompt_tokens=4000, total_tokens=4500),
+        env=LocalEnvironment(),
+        **default_config,
+    )
+    agent.context_window_max = 8000
+    agent.messages = [{"role": "system", "content": "system"}, {"role": "user", "content": "hi"}]
+
+    response = agent.query()
+
+    assert response["context_left_percent"] == 50
+    assert agent.context_left_percent == 50
+    assert agent.context_window_prompt_tokens == 4000
+    assert agent.messages[-1]["context_left_percent"] == 50
 
 
 def test_step_limit_enforcement(default_config):

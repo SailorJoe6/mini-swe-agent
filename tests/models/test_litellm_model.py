@@ -1,10 +1,12 @@
 import json
 import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 import litellm
 import pytest
+from litellm.types.utils import Usage
 
 from minisweagent.models import GLOBAL_MODEL_STATS
 from minisweagent.models.litellm_model import LitellmModel
@@ -121,6 +123,37 @@ def test_litellm_model_cost_validation_zero_cost():
 
             assert "Cost must be > 0.0, got 0.0" in str(exc_info.value)
             assert "MSWEA_COST_TRACKING='ignore_errors'" in str(exc_info.value)
+
+
+def test_streaming_fallback_when_usage_invalid():
+    model = LitellmModel(model_name="gpt-4", use_streaming=True, stream_include_usage=True)
+
+    stream_chunk = SimpleNamespace(
+        id="chunk1",
+        created=0,
+        model="gpt-4",
+        choices=[SimpleNamespace(delta=SimpleNamespace(content="partial"))],
+        usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    )
+
+    non_stream_response = Mock()
+    non_stream_response.choices = [Mock(message=Mock(content="final response"))]
+    non_stream_response.model_dump.return_value = {"usage": {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17}}
+    non_stream_response.usage = Usage(prompt_tokens=12, completion_tokens=5, total_tokens=17)
+
+    def completion_side_effect(*args, **kwargs):
+        if kwargs.get("stream"):
+            return iter([stream_chunk])
+        return non_stream_response
+
+    with patch("litellm.completion") as mock_completion:
+        mock_completion.side_effect = completion_side_effect
+        response = model._query([{"role": "user", "content": "test"}])
+
+    assert response is non_stream_response
+    assert mock_completion.call_count == 2
+    assert mock_completion.call_args_list[0][1].get("stream") is True
+    assert mock_completion.call_args_list[1][1].get("stream", False) is False
 
 
 def test_response_api_model_basic_query():
