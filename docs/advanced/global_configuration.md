@@ -124,6 +124,16 @@ MSWEA_INSPECTOR_STYLE_PATH="/path/to/your/inspector/style.tcss"
 MSWEA_MINI_STYLE_PATH="/path/to/your/mini/style.tcss"
 ```
 
+## Context window map
+
+mini-swe-agent maintains a user-editable model context window map in your global config directory:
+
+```
+model_context_windows.yaml
+```
+
+The file is seeded from the built-in defaults on first use and can be edited to add or correct model limits.
+
 ### Settings for environments
 
 ```bash
