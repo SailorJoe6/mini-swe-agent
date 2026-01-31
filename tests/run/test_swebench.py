@@ -1,9 +1,11 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
+import yaml
 from pydantic import BaseModel
 
 from minisweagent import package_dir
@@ -524,6 +526,7 @@ def test_progress_status_includes_context_left(tmp_path):
         env=LocalEnvironment(),
         progress_manager=progress_manager,
         instance_id="instance-1",
+        **yaml.safe_load(Path("src/minisweagent/config/default.yaml").read_text())["agent"],
     )
     agent.context_window_max = 100
     agent.messages = [{"role": "system", "content": "system"}, {"role": "user", "content": "hi"}]

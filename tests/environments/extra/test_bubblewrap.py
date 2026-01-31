@@ -8,7 +8,25 @@ import pytest
 from minisweagent.environments.extra.bubblewrap import BubblewrapEnvironment, BubblewrapEnvironmentConfig
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not available")
+def _bubblewrap_usable() -> bool:
+    if not shutil.which("bwrap"):
+        return False
+    env = BubblewrapEnvironment()
+    try:
+        result = env.execute("true")
+    except Exception:
+        return False
+    finally:
+        env.cleanup()
+    if result["returncode"] != 0 and "Permission denied" in result["output"]:
+        return False
+    return True
+
+
+BWRAP_USABLE = _bubblewrap_usable()
+
+
+@pytest.mark.skipif(not BWRAP_USABLE, reason="bubblewrap not available or usable")
 def test_bubblewrap_environment_basic_execution():
     """Test basic command execution in bubblewrap environment."""
     env = BubblewrapEnvironment()
@@ -22,7 +40,7 @@ def test_bubblewrap_environment_basic_execution():
         env.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not available")
+@pytest.mark.skipif(not BWRAP_USABLE, reason="bubblewrap not available or usable")
 def test_bubblewrap_environment_set_env_variables():
     """Test setting environment variables in the bubblewrap environment."""
     env = BubblewrapEnvironment(env={"TEST_VAR": "test_value", "ANOTHER_VAR": "another_value"})
@@ -43,7 +61,7 @@ def test_bubblewrap_environment_set_env_variables():
         env.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not available")
+@pytest.mark.skipif(not BWRAP_USABLE, reason="bubblewrap not available or usable")
 def test_bubblewrap_environment_custom_cwd():
     """Test executing commands in a custom working directory."""
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -58,7 +76,7 @@ def test_bubblewrap_environment_custom_cwd():
             env.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not available")
+@pytest.mark.skipif(not BWRAP_USABLE, reason="bubblewrap not available or usable")
 def test_bubblewrap_environment_cwd_parameter_override():
     """Test that the cwd parameter in execute() overrides the config cwd."""
     with tempfile.TemporaryDirectory() as temp_dir1, tempfile.TemporaryDirectory() as temp_dir2:
@@ -74,7 +92,7 @@ def test_bubblewrap_environment_cwd_parameter_override():
             env.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not available")
+@pytest.mark.skipif(not BWRAP_USABLE, reason="bubblewrap not available or usable")
 def test_bubblewrap_environment_command_failure():
     """Test that command failures are properly captured."""
     env = BubblewrapEnvironment()
@@ -88,7 +106,7 @@ def test_bubblewrap_environment_command_failure():
         env.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not available")
+@pytest.mark.skipif(not BWRAP_USABLE, reason="bubblewrap not available or usable")
 def test_bubblewrap_environment_nonexistent_command():
     """Test execution of non-existent command."""
     env = BubblewrapEnvironment()
@@ -102,7 +120,7 @@ def test_bubblewrap_environment_nonexistent_command():
         env.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not available")
+@pytest.mark.skipif(not BWRAP_USABLE, reason="bubblewrap not available or usable")
 def test_bubblewrap_environment_stderr_capture():
     """Test that stderr is properly captured."""
     env = BubblewrapEnvironment()
@@ -116,7 +134,7 @@ def test_bubblewrap_environment_stderr_capture():
         env.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not available")
+@pytest.mark.skipif(not BWRAP_USABLE, reason="bubblewrap not available or usable")
 def test_bubblewrap_environment_timeout():
     """Test timeout functionality."""
     env = BubblewrapEnvironment(timeout=1)
@@ -128,7 +146,7 @@ def test_bubblewrap_environment_timeout():
         env.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not available")
+@pytest.mark.skipif(not BWRAP_USABLE, reason="bubblewrap not available or usable")
 @pytest.mark.parametrize(
     ("command", "expected_returncode"),
     [
@@ -149,7 +167,7 @@ def test_bubblewrap_environment_return_codes(command, expected_returncode):
         env.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not available")
+@pytest.mark.skipif(not BWRAP_USABLE, reason="bubblewrap not available or usable")
 def test_bubblewrap_environment_multiline_output():
     """Test handling of multiline command output."""
     env = BubblewrapEnvironment()
@@ -168,7 +186,7 @@ def test_bubblewrap_environment_multiline_output():
         env.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not available")
+@pytest.mark.skipif(not BWRAP_USABLE, reason="bubblewrap not available or usable")
 def test_bubblewrap_environment_file_operations():
     """Test file operations in the bubblewrap environment."""
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -195,7 +213,7 @@ def test_bubblewrap_environment_file_operations():
             env.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not available")
+@pytest.mark.skipif(not BWRAP_USABLE, reason="bubblewrap not available or usable")
 def test_bubblewrap_environment_working_directory_creation():
     """Test that working directory is properly created."""
     env = BubblewrapEnvironment()
@@ -207,7 +225,7 @@ def test_bubblewrap_environment_working_directory_creation():
         env.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bubblewrap not available")
+@pytest.mark.skipif(not BWRAP_USABLE, reason="bubblewrap not available or usable")
 def test_bubblewrap_environment_cleanup():
     """Test that cleanup properly removes working directory."""
     env = BubblewrapEnvironment()

@@ -3,6 +3,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytest.importorskip("portkey_ai")
+
 from minisweagent.models import GLOBAL_MODEL_STATS
 from minisweagent.models.portkey_model import PortkeyModel, PortkeyModelConfig
 

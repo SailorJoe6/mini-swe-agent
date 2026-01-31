@@ -110,15 +110,31 @@ async def test_everything_integration_test(default_config):
 
 async def test_title_includes_context_left(default_config):
     app = TextualAgent(
-        model=DeterministicModel(outputs=["Step\n```bash\necho 'ok'\n```"]),
+        model=DeterministicModel(
+            outputs=[
+                "/sleep 0.2",
+                "THOUGHTT 1\n ```bash\necho '1'\n```",
+                "THOUGHTT 2\n ```bash\necho '2'\n```",
+                "THOUGHTT 3\n ```bash\necho '3'\n```",
+                "THOUGHTT 4\n ```bash\necho '4'\n```",
+                "THOUGHTT 5\n ```bash\necho '5'\n```",
+                "THOUGHTT 6\n ```bash\necho '6'\n```",
+                "FINISHING\n ```bash\necho 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\n```",
+                "FINISHING2\n ```bash\necho 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'\n```",
+            ],
+        ),
         env=LocalEnvironment(),
         **default_config,
     )
     async with app.run_test() as pilot:
-        await pilot.pause(0)
+        threading.Thread(target=lambda: app.agent.run("What's up?"), daemon=True).start()
+        await pilot.pause(0.4)
         app.agent.context_left_percent = 42
         app._update_headers()
         assert "42% context left" in app.title
+        await pilot.pause(0.5)
+        assert "Step 2/2" in app.title
+        await pilot.press("enter")
         await pilot.pause(0.5)
         print("---")
         print(get_screen_text(app))

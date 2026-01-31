@@ -1,6 +1,8 @@
 import json
+import os
 import threading
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -8,6 +10,12 @@ from minisweagent.models import GLOBAL_MODEL_STATS
 
 # Global lock for tests that modify global state - this works across threads
 _global_stats_lock = threading.Lock()
+
+
+def pytest_configure(config):
+    """Ensure console scripts in the current venv are discoverable by subprocess."""
+    bin_dir = Path(sys.executable).parent
+    os.environ["PATH"] = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"
 
 
 @pytest.fixture
