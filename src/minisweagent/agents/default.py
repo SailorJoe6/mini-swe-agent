@@ -75,7 +75,7 @@ class DefaultAgent:
                 self._live_trajectory_path.parent.mkdir(parents=True, exist_ok=True)
                 with self._live_trajectory_path.open("a", encoding="utf-8") as handle:
                     for message in messages:
-                        handle.write(json.dumps(message) + "\n")
+                        handle.write(json.dumps(to_jsonable(message)) + "\n")
             except Exception as exc:
                 self.logger.warning(
                     "Failed to write live trajectory to %s: %s", self._live_trajectory_path, exc
