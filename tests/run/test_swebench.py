@@ -82,6 +82,22 @@ def test_get_image_name_with_existing_image_name():
     assert get_swebench_docker_image_name(instance) == "custom/image:tag"
 
 
+def test_get_image_name_with_docker_image_field():
+    """Test get_image_name when docker_image is provided"""
+    instance = {"docker_image": "live/image:tag", "instance_id": "test__repo__1"}
+    assert get_swebench_docker_image_name(instance) == "live/image:tag"
+
+
+def test_get_image_name_prefers_image_name_over_docker_image():
+    """Test get_image_name prefers image_name when both fields are present"""
+    instance = {
+        "image_name": "custom/image:tag",
+        "docker_image": "live/image:tag",
+        "instance_id": "test__repo__1",
+    }
+    assert get_swebench_docker_image_name(instance) == "custom/image:tag"
+
+
 def test_get_image_name_without_image_name():
     """Test get_image_name when image_name needs to be constructed"""
     instance = {"instance_id": "swe-agent__test-repo__1"}

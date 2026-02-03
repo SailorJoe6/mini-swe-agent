@@ -80,13 +80,16 @@ class ProgressTrackingAgent(DefaultAgent):
 
 def get_swebench_docker_image_name(instance: dict) -> str:
     """Get the image name for a SWEBench instance."""
-    image_name = instance.get("image_name", None)
-    if image_name is None:
-        # Docker doesn't allow double underscore, so we replace them with a magic token
-        iid = instance["instance_id"]
-        id_docker_compatible = iid.replace("__", "_1776_")
-        image_name = f"docker.io/swebench/sweb.eval.x86_64.{id_docker_compatible}:latest".lower()
-    return image_name
+    image_name = instance.get("image_name")
+    if image_name:
+        return image_name
+    docker_image = instance.get("docker_image")
+    if docker_image:
+        return docker_image
+    # Docker doesn't allow double underscore, so we replace them with a magic token
+    iid = instance["instance_id"]
+    id_docker_compatible = iid.replace("__", "_1776_")
+    return f"docker.io/swebench/sweb.eval.x86_64.{id_docker_compatible}:latest".lower()
 
 
 def get_sb_environment(config: dict, instance: dict) -> Environment:

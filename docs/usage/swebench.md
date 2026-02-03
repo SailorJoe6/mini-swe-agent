@@ -59,6 +59,11 @@
         - `--shuffle` - Shuffle instances (default: `False`)
         - `--redo-existing` - Redo existing instances (default: `False`)
 
+        Dataset note:
+
+        - SWE-bench-Live/MultiLang instances provide `docker_image` instead of `image_name`.
+          The runner accepts either field and uses `image_name` when both are present.
+
         Advanced flags:
 
         - `--environment-class` - Environment type to use (recommended: `docker` or `singularity`)
