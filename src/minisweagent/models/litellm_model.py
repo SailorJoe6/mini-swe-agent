@@ -4,6 +4,7 @@ import os
 import time
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal
 
 import litellm
@@ -24,6 +25,59 @@ from minisweagent.models.utils.retry import retry
 logger = logging.getLogger("litellm_model")
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+class _StreamingMessage:
+    def __init__(self, *, role: str, content: str | None, tool_calls: list):
+        self.role = role
+        self.content = content
+        self.tool_calls = tool_calls
+
+    def model_dump(self) -> dict:
+        return {
+            "role": self.role,
+            "content": self.content,
+            "tool_calls": self.tool_calls,
+        }
+
+
+class _StreamingChoice:
+    def __init__(self, *, index: int, message: _StreamingMessage, finish_reason: str | None):
+        self.index = index
+        self.message = message
+        self.finish_reason = finish_reason
+
+    def model_dump(self) -> dict:
+        return {
+            "index": self.index,
+            "message": self.message.model_dump(),
+            "finish_reason": self.finish_reason,
+        }
+
+
+class _StreamingResponse(dict):
+    def __init__(self, *, choices: list[_StreamingChoice], usage: dict | None, model: str | None, **kwargs):
+        data: dict[str, Any] = {"choices": choices, **kwargs}
+        if usage is not None:
+            data["usage"] = usage
+        if model is not None:
+            data["model"] = model
+        super().__init__(data)
+        self.choices = choices
+        self.usage = usage
+        self.model = model
+
+    def model_dump(self) -> dict:
+        data = dict(self)
+        data["choices"] = [choice.model_dump() for choice in self.choices]
+        return data
+
+
 class LitellmModelConfig(BaseModel):
     model_name: str
     """Model name. Highly recommended to include the provider in the model name, e.g., `anthropic/claude-sonnet-4-5-20250929`."""
@@ -35,6 +89,10 @@ class LitellmModelConfig(BaseModel):
     """Set explicit cache control markers, for example for Anthropic models"""
     cost_tracking: Literal["default", "ignore_errors"] = os.getenv("MSWEA_COST_TRACKING", "default")
     """Cost tracking mode for this model. Can be "default" or "ignore_errors" (ignore errors/missing cost info)"""
+    use_streaming: bool = _env_flag("MSWEA_USE_STREAMING", False)
+    """Stream responses from LiteLLM to avoid long-response timeouts."""
+    stream_include_usage: bool = _env_flag("MSWEA_STREAM_INCLUDE_USAGE", True)
+    """Include usage data in stream chunks when supported."""
     format_error_template: str = "{{ error }}"
     """Template used when the LM's output is not in the expected format."""
     observation_template: str = (
@@ -63,15 +121,153 @@ class LitellmModel:
 
     def _query(self, messages: list[dict[str, str]], **kwargs):
         try:
-            return litellm.completion(
-                model=self.config.model_name,
-                messages=messages,
-                tools=[BASH_TOOL],
-                **(self.config.model_kwargs | kwargs),
-            )
+            if self.config.use_streaming:
+                return self._query_streaming(messages, **kwargs)
+            return self._query_non_streaming(messages, **kwargs)
         except litellm.exceptions.AuthenticationError as e:
             e.message += " You can permanently set your API key with `mini-extra config set KEY VALUE`."
             raise e
+
+    def _query_non_streaming(self, messages: list[dict[str, str]], **kwargs):
+        return litellm.completion(
+            model=self.config.model_name,
+            messages=messages,
+            tools=[BASH_TOOL],
+            **(self.config.model_kwargs | kwargs),
+        )
+
+    def _query_streaming(self, messages: list[dict[str, str]], **kwargs):
+        stream_kwargs = self.config.model_kwargs | kwargs
+        if self.config.stream_include_usage:
+            stream_options = dict(stream_kwargs.get("stream_options") or {})
+            stream_options.setdefault("include_usage", True)
+            stream_kwargs["stream_options"] = stream_options
+        stream = litellm.completion(
+            model=self.config.model_name,
+            messages=messages,
+            tools=[BASH_TOOL],
+            stream=True,
+            **stream_kwargs,
+        )
+        response = self._reconstruct_stream_response(stream)
+        if self.config.stream_include_usage and not self._is_usage_valid(response.usage):
+            logger.warning("Streaming response missing usage; retrying non-streaming completion for cost tracking.")
+            return self._query_non_streaming(messages, **kwargs)
+        return response
+
+    @staticmethod
+    def _is_usage_valid(usage: dict | None) -> bool:
+        if not isinstance(usage, dict):
+            return False
+        for key in ("prompt_tokens", "completion_tokens"):
+            value = usage.get(key)
+            if not isinstance(value, int) or value < 0:
+                return False
+        return True
+
+    @staticmethod
+    def _normalize_usage(usage: Any) -> dict | None:
+        if usage is None:
+            return None
+        if isinstance(usage, dict):
+            return usage
+        if hasattr(usage, "model_dump"):
+            return usage.model_dump()
+        if hasattr(usage, "__dict__"):
+            return usage.__dict__
+        return None
+
+    @staticmethod
+    def _normalize_tool_call_delta(tool_call: Any) -> dict | None:
+        if tool_call is None:
+            return None
+        if isinstance(tool_call, dict):
+            return tool_call
+        if hasattr(tool_call, "model_dump"):
+            return tool_call.model_dump()
+        if hasattr(tool_call, "__dict__"):
+            return tool_call.__dict__
+        return None
+
+    def _accumulate_tool_calls(self, tool_calls_by_index: dict[int, dict], delta_tool_calls: list[Any]) -> None:
+        for raw_tool_call in delta_tool_calls:
+            tool_call = self._normalize_tool_call_delta(raw_tool_call)
+            if not tool_call:
+                continue
+            index = tool_call.get("index", 0)
+            entry = tool_calls_by_index.setdefault(
+                index, {"id": None, "type": None, "function": {"name": None, "arguments": ""}}
+            )
+            if tool_call.get("id"):
+                entry["id"] = tool_call["id"]
+            if tool_call.get("type"):
+                entry["type"] = tool_call["type"]
+            function = tool_call.get("function") or {}
+            if function.get("name"):
+                entry["function"]["name"] = function["name"]
+            if function.get("arguments"):
+                entry["function"]["arguments"] += function["arguments"]
+
+    def _build_tool_calls(self, tool_calls_by_index: dict[int, dict]) -> list:
+        tool_calls = []
+        for index in sorted(tool_calls_by_index):
+            data = tool_calls_by_index[index]
+            function = SimpleNamespace(
+                name=data["function"].get("name"),
+                arguments=data["function"].get("arguments", ""),
+            )
+            tool_call = SimpleNamespace(id=data.get("id"), function=function, type=data.get("type"))
+            tool_calls.append(tool_call)
+        return tool_calls
+
+    def _reconstruct_stream_response(self, stream) -> _StreamingResponse:
+        content_parts: list[str] = []
+        tool_calls_by_index: dict[int, dict] = {}
+        usage: dict | None = None
+        finish_reason: str | None = None
+        role = "assistant"
+        model = None
+        response_id = None
+        created = None
+
+        for chunk in stream:
+            if chunk is None:
+                continue
+            model = getattr(chunk, "model", model)
+            response_id = getattr(chunk, "id", response_id)
+            created = getattr(chunk, "created", created)
+            chunk_usage = self._normalize_usage(getattr(chunk, "usage", None))
+            if chunk_usage is not None:
+                usage = chunk_usage
+            choices = getattr(chunk, "choices", None)
+            if not choices:
+                continue
+            choice = choices[0]
+            finish_reason = getattr(choice, "finish_reason", finish_reason)
+            delta = getattr(choice, "delta", None) or getattr(choice, "message", None)
+            if not delta:
+                continue
+            delta_role = getattr(delta, "role", None)
+            if delta_role:
+                role = delta_role
+            delta_content = getattr(delta, "content", None)
+            if delta_content:
+                content_parts.append(delta_content)
+            delta_tool_calls = getattr(delta, "tool_calls", None)
+            if delta_tool_calls:
+                self._accumulate_tool_calls(tool_calls_by_index, delta_tool_calls)
+
+        tool_calls = self._build_tool_calls(tool_calls_by_index) if tool_calls_by_index else []
+        content = "".join(content_parts) if content_parts else None
+        message = _StreamingMessage(role=role, content=content, tool_calls=tool_calls)
+        choice = _StreamingChoice(index=0, message=message, finish_reason=finish_reason)
+        return _StreamingResponse(
+            choices=[choice],
+            usage=usage,
+            model=model,
+            id=response_id,
+            created=created,
+        )
 
     def _prepare_messages_for_api(self, messages: list[dict]) -> list[dict]:
         prepared = [{k: v for k, v in msg.items() if k != "extra"} for msg in messages]
