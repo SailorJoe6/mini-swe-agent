@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -24,12 +25,24 @@ from minisweagent.models.utils.retry import retry
 
 logger = logging.getLogger("litellm_model")
 
+CLOSING_TAG_RE = re.compile(r"</[^>]+>")
+
 
 def _env_flag(name: str, default: bool) -> bool:
     value = os.getenv(name)
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
 
 
 class _StreamingMessage:
@@ -93,6 +106,12 @@ class LitellmModelConfig(BaseModel):
     """Stream responses from LiteLLM to avoid long-response timeouts."""
     stream_include_usage: bool = _env_flag("MSWEA_STREAM_INCLUDE_USAGE", True)
     """Include usage data in stream chunks when supported."""
+    stream_guard_enabled: bool = _env_flag("MSWEA_STREAM_GUARD_ENABLED", False)
+    """Enable stream guard to stop pathological closing-tag repetition."""
+    stream_guard_window: int = _env_int("MSWEA_STREAM_GUARD_WINDOW", 8192)
+    """Window size in characters for stream guard repetition detection."""
+    stream_guard_tag_threshold: int = _env_int("MSWEA_STREAM_GUARD_TAG_THRESHOLD", 50)
+    """Closing-tag repetition threshold in the rolling window before truncation."""
     format_error_template: str = "{{ error }}"
     """Template used when the LM's output is not in the expected format."""
     observation_template: str = (
@@ -221,7 +240,7 @@ class LitellmModel:
         return tool_calls
 
     def _reconstruct_stream_response(self, stream) -> _StreamingResponse:
-        content_parts: list[str] = []
+        content_text = ""
         tool_calls_by_index: dict[int, dict] = {}
         usage: dict | None = None
         finish_reason: str | None = None
@@ -229,7 +248,6 @@ class LitellmModel:
         model = None
         response_id = None
         created = None
-
         for chunk in stream:
             if chunk is None:
                 continue
@@ -250,15 +268,19 @@ class LitellmModel:
             delta_role = getattr(delta, "role", None)
             if delta_role:
                 role = delta_role
-            delta_content = getattr(delta, "content", None)
-            if delta_content:
-                content_parts.append(delta_content)
             delta_tool_calls = getattr(delta, "tool_calls", None)
             if delta_tool_calls:
                 self._accumulate_tool_calls(tool_calls_by_index, delta_tool_calls)
+            delta_content = getattr(delta, "content", None)
+            if delta_content:
+                content_text += delta_content
+                if self._should_trigger_stream_guard(content_text):
+                    content_text = self._truncate_stream_content(content_text)
+                    logger.warning("Stream guard triggered; truncating streamed content.")
+                    break
 
         tool_calls = self._build_tool_calls(tool_calls_by_index) if tool_calls_by_index else []
-        content = "".join(content_parts) if content_parts else None
+        content = content_text if content_text else None
         message = _StreamingMessage(role=role, content=content, tool_calls=tool_calls)
         choice = _StreamingChoice(index=0, message=message, finish_reason=finish_reason)
         return _StreamingResponse(
@@ -268,6 +290,29 @@ class LitellmModel:
             id=response_id,
             created=created,
         )
+
+    def _should_trigger_stream_guard(self, content: str) -> bool:
+        if not self.config.stream_guard_enabled:
+            return False
+        window_size = self.config.stream_guard_window
+        threshold = self.config.stream_guard_tag_threshold
+        if window_size <= 0 or threshold <= 0:
+            return False
+        window = content[-window_size:] if len(content) > window_size else content
+        matches = list(CLOSING_TAG_RE.finditer(window))
+        return len(matches) >= threshold
+
+    def _truncate_stream_content(self, content: str) -> str:
+        window_size = self.config.stream_guard_window
+        threshold = self.config.stream_guard_tag_threshold
+        if window_size <= 0 or threshold <= 0:
+            return content
+        window = content[-window_size:] if len(content) > window_size else content
+        matches = list(CLOSING_TAG_RE.finditer(window))
+        if len(matches) < threshold:
+            return content
+        cutoff = len(content) - len(window) + matches[threshold - 1].start()
+        return content[:cutoff]
 
     def _prepare_messages_for_api(self, messages: list[dict]) -> list[dict]:
         prepared = [{k: v for k, v in msg.items() if k != "extra"} for msg in messages]

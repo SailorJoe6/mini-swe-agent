@@ -146,3 +146,71 @@ class TestLitellmModel:
         assert mock_completion.call_args_list[0].kwargs["stream"] is True
         assert mock_completion.call_args_list[1].kwargs.get("stream") is None
         assert result["extra"]["actions"] == [{"command": "ls -la", "tool_call_id": "call_abc"}]
+
+    @patch("minisweagent.models.litellm_model.litellm.completion")
+    @patch("minisweagent.models.litellm_model.litellm.cost_calculator.completion_cost")
+    def test_stream_guard_truncates_repeated_closing_tags(self, mock_cost, mock_completion, caplog):
+        tool_call_delta = {
+            "index": 0,
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "bash", "arguments": '{"command": "echo test"}'},
+        }
+        stream = iter(
+            [
+                _make_stream_chunk(
+                    content="</final></final>",
+                    tool_calls=[tool_call_delta],
+                    usage={"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+                    finish_reason="stop",
+                ),
+            ]
+        )
+        mock_completion.return_value = stream
+        mock_cost.return_value = 0.001
+
+        model = LitellmModel(
+            model_name="gpt-4",
+            use_streaming=True,
+            stream_guard_enabled=True,
+            stream_guard_window=200,
+            stream_guard_tag_threshold=2,
+        )
+        with caplog.at_level("WARNING"):
+            result = model.query([{"role": "user", "content": "test"}])
+
+        assert "Stream guard triggered" in caplog.text
+        assert result["content"] == "</final>"
+
+    @patch("minisweagent.models.litellm_model.litellm.completion")
+    @patch("minisweagent.models.litellm_model.litellm.cost_calculator.completion_cost")
+    def test_stream_guard_allows_normal_content(self, mock_cost, mock_completion):
+        tool_call_delta = {
+            "index": 0,
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "bash", "arguments": '{"command": "echo test"}'},
+        }
+        stream = iter(
+            [
+                _make_stream_chunk(content="Hello ", tool_calls=[tool_call_delta], finish_reason=None),
+                _make_stream_chunk(
+                    content="world</final>",
+                    usage={"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+                    finish_reason="stop",
+                ),
+            ]
+        )
+        mock_completion.return_value = stream
+        mock_cost.return_value = 0.001
+
+        model = LitellmModel(
+            model_name="gpt-4",
+            use_streaming=True,
+            stream_guard_enabled=True,
+            stream_guard_window=50,
+            stream_guard_tag_threshold=3,
+        )
+        result = model.query([{"role": "user", "content": "test"}])
+
+        assert result["content"] == "Hello world</final>"
