@@ -93,6 +93,18 @@ Messages follow the [OpenAI chat format](https://platform.openai.com/docs/api-re
 }
 ```
 
+## Live trajectory streaming (`.traj.jsonl`)
+
+When running the SWE-bench batch runner, mini-SWE-agent writes a live JSONL stream for each instance while it is executing. Each line is a single message object, appended as it is produced.
+
+The live stream is deleted after the final `.traj.json` is written, so it is only present during the run.
+
+Example: follow the latest active stream in a run directory:
+
+```bash
+tail -f "logs/swebench-multilingual/<model>/<instance>/<instance>.traj.jsonl"
+```
+
 
 ## `preds.json` format
 

@@ -143,9 +143,12 @@ def process_instance(
     """Process a single SWEBench instance."""
     instance_id = instance["instance_id"]
     instance_dir = output_dir / instance_id
+    instance_dir.mkdir(parents=True, exist_ok=True)
+    live_traj_path = instance_dir / f"{instance_id}.traj.jsonl"
     # avoid inconsistent state if something here fails and there's leftover previous files
     remove_from_preds_file(output_dir / "preds.json", instance_id)
     (instance_dir / f"{instance_id}.traj.json").unlink(missing_ok=True)
+    live_traj_path.unlink(missing_ok=True)
     model = get_model(config=config.get("model", {}))
     task = instance["problem_statement"]
 
@@ -166,6 +169,7 @@ def process_instance(
             instance_id=instance_id,
             **config.get("agent", {}),
         )
+        agent.set_live_trajectory_path(live_traj_path)
         info = agent.run(task)
         exit_status = info.get("exit_status")
         result = info.get("submission")
@@ -188,6 +192,7 @@ def process_instance(
                 },
             )
             logger.info(f"Saved trajectory to '{traj_path}'")
+            live_traj_path.unlink(missing_ok=True)
         update_preds_file(output_dir / "preds.json", instance_id, model.config.model_name, result)
         progress_manager.on_instance_end(instance_id, exit_status)
 

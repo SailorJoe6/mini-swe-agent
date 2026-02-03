@@ -1,16 +1,21 @@
 import json
 import re
-from unittest.mock import patch
+import threading
+import time
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
 
 from minisweagent import package_dir
+from minisweagent.environments.local import LocalEnvironment
 from minisweagent.models.test_models import DeterministicModel, make_output
 from minisweagent.run.benchmarks.swebench import (
     filter_instances,
     get_swebench_docker_image_name,
     main,
+    process_instance,
     remove_from_preds_file,
     update_preds_file,
 )
@@ -28,6 +33,47 @@ def _make_model_from_fixture(text_outputs: list[str], cost_per_call: float = 1.0
         cost_per_call=cost_per_call,
         **kwargs,
     )
+
+
+class SlowExitModel:
+    def __init__(self, delay: float = 0.2):
+        self.delay = delay
+        self.config = SimpleNamespace(model_name="slow_exit")
+
+    def query(self, messages: list[dict[str, str]], **kwargs) -> dict:
+        time.sleep(self.delay)
+        return {
+            "role": "exit",
+            "content": "",
+            "extra": {
+                "exit_status": "Submitted",
+                "submission": "",
+                "cost": 0.0,
+                "timestamp": time.time(),
+                "actions": [],
+            },
+        }
+
+    def format_message(self, **kwargs) -> dict:
+        return kwargs
+
+    def format_observation_messages(
+        self, message: dict, outputs: list[dict], template_vars: dict | None = None
+    ) -> list[dict]:
+        return []
+
+    def get_template_vars(self, **kwargs) -> dict:
+        return {"model_name": self.config.model_name}
+
+    def serialize(self) -> dict:
+        return {
+            "info": {
+                "config": {
+                    "model": {"model_name": self.config.model_name},
+                    "model_type": f"{self.__class__.__module__}.{self.__class__.__name__}",
+                },
+            },
+        }
 
 
 @pytest.mark.slow
@@ -117,6 +163,42 @@ def test_get_image_name_with_complex_instance_id():
     instance = {"instance_id": "project__sub__module__version__1.2.3"}
     expected = "docker.io/swebench/sweb.eval.x86_64.project_1776_sub_1776_module_1776_version_1776_1.2.3:latest"
     assert get_swebench_docker_image_name(instance) == expected
+
+
+def test_live_trajectory_streaming_lifecycle(tmp_path):
+    instance_id = "swe-agent__test-repo-1"
+    instance = {"instance_id": instance_id, "problem_statement": "Do the thing."}
+    progress_manager = MagicMock()
+    config: dict = {
+        "agent": {
+            "system_template": "You are a test agent.",
+            "instance_template": "{{ task }}",
+        },
+        "model": {},
+    }
+
+    with patch("minisweagent.run.benchmarks.swebench.get_model", return_value=SlowExitModel()), patch(
+        "minisweagent.run.benchmarks.swebench.get_sb_environment", return_value=LocalEnvironment()
+    ):
+        thread = threading.Thread(
+            target=process_instance,
+            args=(instance, tmp_path, config, progress_manager),
+        )
+        thread.start()
+
+        live_path = tmp_path / instance_id / f"{instance_id}.traj.jsonl"
+        for _ in range(50):
+            if live_path.exists():
+                break
+            time.sleep(0.01)
+
+        assert live_path.exists()
+        assert len(live_path.read_text().splitlines()) >= 2
+
+        thread.join()
+
+    assert not live_path.exists()
+    assert (tmp_path / instance_id / f"{instance_id}.traj.json").exists()
 
 
 def test_filter_instances_no_filters():

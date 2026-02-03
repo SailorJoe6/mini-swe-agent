@@ -41,6 +41,18 @@ class DefaultAgent:
         self.logger = logging.getLogger("agent")
         self.cost = 0.0
         self.n_calls = 0
+        self._live_trajectory_path: Path | None = None
+
+    def set_live_trajectory_path(self, path: Path | None) -> None:
+        """Set a live JSONL trajectory path and clear any existing file."""
+        self._live_trajectory_path = path
+        if not path:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.unlink(missing_ok=True)
+        except Exception as exc:
+            self.logger.warning("Failed to initialize live trajectory file %s: %s", path, exc)
 
     def get_template_vars(self, **kwargs) -> dict:
         return recursive_merge(
@@ -58,6 +70,16 @@ class DefaultAgent:
     def add_messages(self, *messages: dict) -> list[dict]:
         self.logger.debug(messages)  # set log level to debug to see
         self.messages.extend(messages)
+        if self._live_trajectory_path:
+            try:
+                self._live_trajectory_path.parent.mkdir(parents=True, exist_ok=True)
+                with self._live_trajectory_path.open("a", encoding="utf-8") as handle:
+                    for message in messages:
+                        handle.write(json.dumps(message) + "\n")
+            except Exception as exc:
+                self.logger.warning(
+                    "Failed to write live trajectory to %s: %s", self._live_trajectory_path, exc
+                )
         return list(messages)
 
     def handle_uncaught_exception(self, e: Exception) -> list[dict]:
