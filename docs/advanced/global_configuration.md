@@ -80,6 +80,25 @@ To register extra models to litellm (see [local models](../models/local_models.m
 LITELLM_MODEL_REGISTRY_PATH="/path/to/your/model/registry.json"
 ```
 
+### Streaming settings (LiteLLM)
+
+```bash
+# Stream responses to avoid long-response timeouts (default: false)
+MSWEA_USE_STREAMING="true"
+
+# Request usage data in stream chunks when supported (default: true)
+MSWEA_STREAM_INCLUDE_USAGE="true"
+
+# Enable stream guard to stop pathological closing-tag repetition (default: false)
+MSWEA_STREAM_GUARD_ENABLED="true"
+
+# Rolling window size in characters for stream guard detection (default: 8192)
+MSWEA_STREAM_GUARD_WINDOW="8192"
+
+# Closing-tag repetition threshold before truncation (default: 50)
+MSWEA_STREAM_GUARD_TAG_THRESHOLD="50"
+```
+
 Global cost limits:
 
 ```bash
