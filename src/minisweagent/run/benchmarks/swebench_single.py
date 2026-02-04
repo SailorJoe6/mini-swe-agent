@@ -6,6 +6,7 @@ import typer
 from datasets import load_dataset
 
 from minisweagent import global_config_dir
+from minisweagent.agents import resolve_agent_class
 from minisweagent.agents.interactive import InteractiveAgent
 from minisweagent.config import builtin_config_dir, get_config_from_spec
 from minisweagent.models import get_model
@@ -89,10 +90,13 @@ def main(
     config = recursive_merge(*configs)
 
     env = get_sb_environment(config, instance)
-    agent = InteractiveAgent(
+    agent_config = dict(config.get("agent", {}))
+    agent_class_spec = agent_config.pop("agent_class", None)
+    agent_class = resolve_agent_class(agent_class_spec, default=InteractiveAgent)
+    agent = agent_class(
         get_model(config=config.get("model", {})),
         env,
-        **config.get("agent", {}),
+        **agent_config,
     )
     agent.set_live_trajectory_path(_get_live_trajectory_path(output))
     agent.run(instance["problem_statement"])

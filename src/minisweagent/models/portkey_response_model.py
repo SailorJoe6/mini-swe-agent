@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from minisweagent.models import GLOBAL_MODEL_STATS
 from minisweagent.models.utils.actions_toolcall_response import (
     BASH_TOOL_RESPONSE_API,
+    BASH_TOOL_RESPONSE_API_WITH_REASONING,
     format_toolcall_observation_messages,
     parse_toolcall_actions_response,
 )
@@ -32,6 +33,8 @@ class PortkeyResponseAPIModelConfig(BaseModel):
     litellm_model_registry: Path | str | None = os.getenv("LITELLM_MODEL_REGISTRY_PATH")
     litellm_model_name_override: str = ""
     cost_tracking: Literal["default", "ignore_errors"] = os.getenv("MSWEA_COST_TRACKING", "default")
+    tool_choice: Any | None = None
+    require_reasoning: bool = False
     format_error_template: str = "{{ error }}"
     observation_template: str = (
         "{% if output.exception_info %}<exception>{{output.exception_info}}</exception>\n{% endif %}"
@@ -70,11 +73,18 @@ class PortkeyResponseAPIModel:
         self.client = Portkey(**client_kwargs)
 
     def _query(self, messages: list[dict[str, str]], **kwargs):
+        request_kwargs = self.config.model_kwargs | kwargs
+        if self.config.tool_choice is not None:
+            request_kwargs["tool_choice"] = self.config.tool_choice
         return self.client.responses.create(
             model=self.config.model_name,
             input=messages,
-            tools=[BASH_TOOL_RESPONSE_API],
-            **(self.config.model_kwargs | kwargs),
+            tools=(
+                [BASH_TOOL_RESPONSE_API_WITH_REASONING]
+                if self.config.require_reasoning
+                else [BASH_TOOL_RESPONSE_API]
+            ),
+            **request_kwargs,
         )
 
     def _prepare_messages_for_api(self, messages: list[dict]) -> list[dict]:
@@ -108,7 +118,11 @@ class PortkeyResponseAPIModel:
     def _parse_actions(self, response) -> list[dict]:
         """Parse tool calls from the response API response."""
         output = response.output if hasattr(response, "output") else response.get("output", [])
-        return parse_toolcall_actions_response(output, format_error_template=self.config.format_error_template)
+        return parse_toolcall_actions_response(
+            output,
+            format_error_template=self.config.format_error_template,
+            require_reasoning=self.config.require_reasoning,
+        )
 
     def _calculate_cost(self, response) -> dict[str, float]:
         try:

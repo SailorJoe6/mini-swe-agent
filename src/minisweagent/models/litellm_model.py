@@ -15,6 +15,7 @@ from minisweagent.exceptions import FormatError
 from minisweagent.models import GLOBAL_MODEL_STATS
 from minisweagent.models.utils.actions_toolcall import (
     BASH_TOOL,
+    BASH_TOOL_WITH_REASONING,
     format_toolcall_observation_messages,
     parse_toolcall_actions,
 )
@@ -112,6 +113,10 @@ class LitellmModelConfig(BaseModel):
     """Window size in characters for stream guard repetition detection."""
     stream_guard_tag_threshold: int = _env_int("MSWEA_STREAM_GUARD_TAG_THRESHOLD", 50)
     """Closing-tag repetition threshold in the rolling window before truncation."""
+    tool_choice: Any | None = None
+    """Tool choice configuration passed to the API (e.g., "required")."""
+    require_reasoning: bool = False
+    """Require non-empty reasoning in bash tool calls."""
     format_error_template: str = "{{ error }}"
     """Template used when the LM's output is not in the expected format."""
     observation_template: str = (
@@ -148,15 +153,22 @@ class LitellmModel:
             raise e
 
     def _query_non_streaming(self, messages: list[dict[str, str]], **kwargs):
+        request_kwargs = self.config.model_kwargs | kwargs
+        tool_choice = self.config.tool_choice
+        if tool_choice is not None:
+            request_kwargs["tool_choice"] = tool_choice
         return litellm.completion(
             model=self.config.model_name,
             messages=messages,
-            tools=[BASH_TOOL],
-            **(self.config.model_kwargs | kwargs),
+            tools=[BASH_TOOL_WITH_REASONING] if self.config.require_reasoning else [BASH_TOOL],
+            **request_kwargs,
         )
 
     def _query_streaming(self, messages: list[dict[str, str]], **kwargs):
         stream_kwargs = self.config.model_kwargs | kwargs
+        tool_choice = self.config.tool_choice
+        if tool_choice is not None:
+            stream_kwargs["tool_choice"] = tool_choice
         if self.config.stream_include_usage:
             stream_options = dict(stream_kwargs.get("stream_options") or {})
             stream_options.setdefault("include_usage", True)
@@ -164,7 +176,7 @@ class LitellmModel:
         stream = litellm.completion(
             model=self.config.model_name,
             messages=messages,
-            tools=[BASH_TOOL],
+            tools=[BASH_TOOL_WITH_REASONING] if self.config.require_reasoning else [BASH_TOOL],
             stream=True,
             **stream_kwargs,
         )
@@ -373,7 +385,11 @@ class LitellmModel:
     def _parse_actions(self, response) -> list[dict]:
         """Parse tool calls from the response. Raises FormatError if unknown tool."""
         tool_calls = response.choices[0].message.tool_calls or []
-        return parse_toolcall_actions(tool_calls, format_error_template=self.config.format_error_template)
+        return parse_toolcall_actions(
+            tool_calls,
+            format_error_template=self.config.format_error_template,
+            require_reasoning=self.config.require_reasoning,
+        )
 
     def format_message(self, **kwargs) -> dict:
         return expand_multimodal_content(kwargs, pattern=self.config.multimodal_regex)

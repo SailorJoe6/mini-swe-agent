@@ -14,6 +14,7 @@ from minisweagent.models.openrouter_model import (
 )
 from minisweagent.models.utils.actions_toolcall_response import (
     BASH_TOOL_RESPONSE_API,
+    BASH_TOOL_RESPONSE_API_WITH_REASONING,
     format_toolcall_observation_messages,
     parse_toolcall_actions_response,
 )
@@ -47,9 +48,15 @@ class OpenRouterResponseModel(OpenRouterModel):
         payload = {
             "model": self.config.model_name,
             "input": messages,
-            "tools": [BASH_TOOL_RESPONSE_API],
+            "tools": (
+                [BASH_TOOL_RESPONSE_API_WITH_REASONING]
+                if self.config.require_reasoning
+                else [BASH_TOOL_RESPONSE_API]
+            ),
             **(self.config.model_kwargs | kwargs),
         }
+        if self.config.tool_choice is not None:
+            payload["tool_choice"] = self.config.tool_choice
         try:
             response = requests.post(self._api_url, headers=headers, data=json.dumps(payload), timeout=60)
             response.raise_for_status()
@@ -96,7 +103,9 @@ class OpenRouterResponseModel(OpenRouterModel):
 
     def _parse_actions(self, response: dict) -> list[dict]:
         return parse_toolcall_actions_response(
-            response.get("output", []), format_error_template=self.config.format_error_template
+            response.get("output", []),
+            format_error_template=self.config.format_error_template,
+            require_reasoning=self.config.require_reasoning,
         )
 
     def format_message(self, **kwargs) -> dict:

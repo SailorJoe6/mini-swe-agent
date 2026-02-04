@@ -1,7 +1,10 @@
 from unittest.mock import Mock, patch
 
 from minisweagent.models.litellm_response_model import LitellmResponseModel
-from minisweagent.models.utils.actions_toolcall_response import BASH_TOOL_RESPONSE_API
+from minisweagent.models.utils.actions_toolcall_response import (
+    BASH_TOOL_RESPONSE_API,
+    BASH_TOOL_RESPONSE_API_WITH_REASONING,
+)
 
 
 @patch("minisweagent.models.litellm_response_model.litellm.responses")
@@ -33,3 +36,28 @@ def test_response_api_tracks_previous_response_id_and_content(mock_cost, mock_re
     assert second["content"] == "World"
     assert mock_responses.call_args_list[0].kwargs["tools"] == [BASH_TOOL_RESPONSE_API]
     assert mock_responses.call_args_list[1].kwargs["previous_response_id"] == "resp_1"
+
+
+@patch("minisweagent.models.litellm_response_model.litellm.responses")
+@patch("minisweagent.models.litellm_response_model.litellm.cost_calculator.completion_cost", return_value=0.01)
+def test_response_api_requires_reasoning_and_tool_choice(mock_cost, mock_responses):
+    output = [
+        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Hello"}]},
+        {
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "bash",
+            "arguments": '{"command": "echo test", "reasoning": "inspect"}',
+        },
+    ]
+    response = Mock()
+    response.output = output
+    response.model_dump.return_value = {"id": "resp_1", "output": output}
+
+    mock_responses.return_value = response
+
+    model = LitellmResponseModel(model_name="gpt-4o", require_reasoning=True, tool_choice="required")
+    model.query([{"role": "user", "content": "hi"}])
+
+    assert mock_responses.call_args.kwargs["tools"] == [BASH_TOOL_RESPONSE_API_WITH_REASONING]
+    assert mock_responses.call_args.kwargs["tool_choice"] == "required"

@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from minisweagent.models import GLOBAL_MODEL_STATS
 from minisweagent.models.utils.actions_toolcall import (
     BASH_TOOL,
+    BASH_TOOL_WITH_REASONING,
     format_toolcall_observation_messages,
     parse_toolcall_actions,
 )
@@ -26,6 +27,10 @@ class RequestyModelConfig(BaseModel):
     model_kwargs: dict[str, Any] = {}
     set_cache_control: Literal["default_end"] | None = None
     """Set explicit cache control markers, for example for Anthropic models"""
+    tool_choice: Any | None = None
+    """Tool choice configuration passed to the API (e.g., "required")."""
+    require_reasoning: bool = False
+    """Require non-empty reasoning in bash tool calls."""
     format_error_template: str = "{{ error }}"
     """Template used when the LM's output is not in the expected format."""
     observation_template: str = (
@@ -74,9 +79,11 @@ class RequestyModel:
         payload = {
             "model": self.config.model_name,
             "messages": messages,
-            "tools": [BASH_TOOL],
+            "tools": [BASH_TOOL_WITH_REASONING] if self.config.require_reasoning else [BASH_TOOL],
             **(self.config.model_kwargs | kwargs),
         }
+        if self.config.tool_choice is not None:
+            payload["tool_choice"] = self.config.tool_choice
 
         try:
             response = requests.post(self._api_url, headers=headers, data=json.dumps(payload), timeout=60)
@@ -127,7 +134,11 @@ class RequestyModel:
         """Parse tool calls from the response. Raises FormatError if unknown tool."""
         tool_calls = response["choices"][0]["message"].get("tool_calls") or []
         tool_calls = [_DictToObj(tc) for tc in tool_calls]
-        return parse_toolcall_actions(tool_calls, format_error_template=self.config.format_error_template)
+        return parse_toolcall_actions(
+            tool_calls,
+            format_error_template=self.config.format_error_template,
+            require_reasoning=self.config.require_reasoning,
+        )
 
     def format_message(self, **kwargs) -> dict:
         return expand_multimodal_content(kwargs, pattern=self.config.multimodal_regex)

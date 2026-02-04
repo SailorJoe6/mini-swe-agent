@@ -5,6 +5,7 @@ import pytest
 from minisweagent.exceptions import FormatError
 from minisweagent.models.utils.actions_toolcall import (
     BASH_TOOL,
+    BASH_TOOL_WITH_REASONING,
     format_toolcall_observation_messages,
     parse_toolcall_actions,
 )
@@ -70,6 +71,33 @@ class TestParseToolcallActions:
             parse_toolcall_actions([tool_call], format_error_template="{{ error }}")
         assert "Missing 'command' argument" in exc_info.value.messages[0]["content"]
 
+    def test_missing_reasoning_raises_format_error(self):
+        tool_call = MagicMock()
+        tool_call.function.name = "bash"
+        tool_call.function.arguments = '{"command": "echo hi"}'
+        tool_call.id = "call_1"
+        with pytest.raises(FormatError) as exc_info:
+            parse_toolcall_actions([tool_call], format_error_template="{{ error }}", require_reasoning=True)
+        assert "Missing or empty 'reasoning' argument" in exc_info.value.messages[0]["content"]
+
+    def test_blank_reasoning_raises_format_error(self):
+        tool_call = MagicMock()
+        tool_call.function.name = "bash"
+        tool_call.function.arguments = '{"command": "echo hi", "reasoning": "   "}'
+        tool_call.id = "call_1"
+        with pytest.raises(FormatError) as exc_info:
+            parse_toolcall_actions([tool_call], format_error_template="{{ error }}", require_reasoning=True)
+        assert "Missing or empty 'reasoning' argument" in exc_info.value.messages[0]["content"]
+
+    def test_valid_reasoning_allows_tool_call(self):
+        tool_call = MagicMock()
+        tool_call.function.name = "bash"
+        tool_call.function.arguments = '{"command": "echo hi", "reasoning": "inspect files"}'
+        tool_call.id = "call_1"
+        assert parse_toolcall_actions([tool_call], format_error_template="{{ error }}", require_reasoning=True) == [
+            {"command": "echo hi", "tool_call_id": "call_1"}
+        ]
+
 
 class TestFormatToolcallObservationMessages:
     def test_basic_formatting(self):
@@ -126,3 +154,12 @@ class TestBashTool:
         assert BASH_TOOL["function"]["name"] == "bash"
         assert "command" in BASH_TOOL["function"]["parameters"]["properties"]
         assert "command" in BASH_TOOL["function"]["parameters"]["required"]
+
+    def test_bash_tool_with_reasoning_structure(self):
+        assert BASH_TOOL_WITH_REASONING["type"] == "function"
+        assert BASH_TOOL_WITH_REASONING["function"]["name"] == "bash"
+        assert "command" in BASH_TOOL_WITH_REASONING["function"]["parameters"]["properties"]
+        assert "reasoning" in BASH_TOOL_WITH_REASONING["function"]["parameters"]["properties"]
+        required = BASH_TOOL_WITH_REASONING["function"]["parameters"]["required"]
+        assert "command" in required
+        assert "reasoning" in required

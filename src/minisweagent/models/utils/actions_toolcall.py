@@ -25,9 +25,38 @@ BASH_TOOL = {
         },
     },
 }
+BASH_TOOL_WITH_REASONING = {
+    "type": "function",
+    "function": {
+        "name": "bash",
+        "description": "Execute a bash command",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reasoning": {
+                    "type": "string",
+                    "description": "Explain why this command is being executed",
+                },
+                "command": {
+                    "type": "string",
+                    "description": "The bash command to execute",
+                },
+            },
+            "required": ["reasoning", "command"],
+        },
+    },
+}
 
 
-def parse_toolcall_actions(tool_calls: list, *, format_error_template: str) -> list[dict]:
+def _reasoning_is_valid(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    return bool(value.strip())
+
+
+def parse_toolcall_actions(
+    tool_calls: list, *, format_error_template: str, require_reasoning: bool = False
+) -> list[dict]:
     """Parse tool calls from the response. Raises FormatError if unknown tool or invalid args."""
     if not tool_calls:
         raise FormatError(
@@ -51,6 +80,8 @@ def parse_toolcall_actions(tool_calls: list, *, format_error_template: str) -> l
             error_msg += f"Unknown tool '{tool_call.function.name}'."
         if "command" not in args:
             error_msg += "Missing 'command' argument in bash tool call."
+        if require_reasoning and not _reasoning_is_valid(args.get("reasoning")):
+            error_msg += "Missing or empty 'reasoning' argument in bash tool call."
         if error_msg:
             raise FormatError(
                 {

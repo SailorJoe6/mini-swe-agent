@@ -8,6 +8,7 @@ from minisweagent.models import GLOBAL_MODEL_STATS
 from minisweagent.models.litellm_model import LitellmModel, LitellmModelConfig
 from minisweagent.models.utils.actions_toolcall_response import (
     BASH_TOOL_RESPONSE_API,
+    BASH_TOOL_RESPONSE_API_WITH_REASONING,
     format_toolcall_observation_messages,
     parse_toolcall_actions_response,
 )
@@ -42,10 +43,16 @@ class LitellmResponseModel(LitellmModel):
             request_kwargs = self.config.model_kwargs | kwargs
             if self._previous_response_id:
                 request_kwargs.setdefault("previous_response_id", self._previous_response_id)
+            if self.config.tool_choice is not None:
+                request_kwargs["tool_choice"] = self.config.tool_choice
             return litellm.responses(
                 model=self.config.model_name,
                 input=messages,
-                tools=[BASH_TOOL_RESPONSE_API],
+                tools=(
+                    [BASH_TOOL_RESPONSE_API_WITH_REASONING]
+                    if self.config.require_reasoning
+                    else [BASH_TOOL_RESPONSE_API]
+                ),
                 **request_kwargs,
             )
         except litellm.exceptions.AuthenticationError as e:
@@ -75,7 +82,9 @@ class LitellmResponseModel(LitellmModel):
 
     def _parse_actions(self, response) -> list[dict]:
         return parse_toolcall_actions_response(
-            getattr(response, "output", []), format_error_template=self.config.format_error_template
+            getattr(response, "output", []),
+            format_error_template=self.config.format_error_template,
+            require_reasoning=self.config.require_reasoning,
         )
 
     def format_observation_messages(

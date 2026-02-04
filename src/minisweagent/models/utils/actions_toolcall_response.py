@@ -23,6 +23,31 @@ BASH_TOOL_RESPONSE_API = {
         "required": ["command"],
     },
 }
+BASH_TOOL_RESPONSE_API_WITH_REASONING = {
+    "type": "function",
+    "name": "bash",
+    "description": "Execute a bash command",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "reasoning": {
+                "type": "string",
+                "description": "Explain why this command is being executed",
+            },
+            "command": {
+                "type": "string",
+                "description": "The bash command to execute",
+            },
+        },
+        "required": ["reasoning", "command"],
+    },
+}
+
+
+def _reasoning_is_valid(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    return bool(value.strip())
 
 
 def _format_error_message(error_text: str) -> dict:
@@ -35,7 +60,9 @@ def _format_error_message(error_text: str) -> dict:
     }
 
 
-def parse_toolcall_actions_response(output: list, *, format_error_template: str) -> list[dict]:
+def parse_toolcall_actions_response(
+    output: list, *, format_error_template: str, require_reasoning: bool = False
+) -> list[dict]:
     """Parse tool calls from a Responses API response output.
 
     Filters for function_call items and parses them.
@@ -66,6 +93,8 @@ def parse_toolcall_actions_response(output: list, *, format_error_template: str)
             error_msg += f"Unknown tool '{tool_call.get('name')}'."
         if "command" not in args:
             error_msg += "Missing 'command' argument in bash tool call."
+        if require_reasoning and not _reasoning_is_valid(args.get("reasoning")):
+            error_msg += "Missing or empty 'reasoning' argument in bash tool call."
         if error_msg:
             error_text = Template(format_error_template, undefined=StrictUndefined).render(error=error_msg.strip())
             raise FormatError(_format_error_message(error_text))

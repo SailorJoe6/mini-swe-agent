@@ -113,6 +113,19 @@
         - `--environment-class` - Environment type to use (recommended: `docker` or `singularity`)
         - `--exit-immediately` - Exit immediately when the agent wants to finish instead of prompting (default: `False`)
 
+!!! tip "Tool-call-only agent (required reasoning)"
+
+    For smaller/local models that struggle to emit tool calls, we provide a tool-call-only agent configuration.
+    It forces `tool_choice: required` and requires a non-empty `reasoning` field in every `bash` tool call.
+
+    ```bash
+    mini-extra swebench -c swebench_toolcall_only.yaml \
+        --model anthropic/claude-sonnet-4-5-20250929 \
+        --subset verified \
+        --split test \
+        --workers 4
+    ```
+
 !!! tip "Evaluating on SWE-bench"
 
     You have two options to evaluate on SWE-bench: Our free cloud-based evaluation or the SWE-bench CLI.

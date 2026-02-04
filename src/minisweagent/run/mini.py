@@ -11,6 +11,7 @@ import typer
 from rich.console import Console
 
 from minisweagent import global_config_dir
+from minisweagent.agents import resolve_agent_class
 from minisweagent.agents.interactive import InteractiveAgent, _multiline_prompt
 from minisweagent.config import builtin_config_dir, get_config_from_spec
 from minisweagent.environments.local import LocalEnvironment
@@ -88,7 +89,10 @@ def main(
 
     model = get_model(config=config.get("model", {}))
     env = LocalEnvironment(**config.get("environment", {}))
-    agent = InteractiveAgent(model, env, **config.get("agent", {}))
+    agent_config = dict(config.get("agent", {}))
+    agent_class_spec = agent_config.pop("agent_class", None)
+    agent_class = resolve_agent_class(agent_class_spec, default=InteractiveAgent)
+    agent = agent_class(model, env, **agent_config)
     agent.run(task)  # type: ignore[arg-type]
     if output:
         console.print(f"Saved trajectory to [bold green]'{output}'[/bold green]")

@@ -5,7 +5,7 @@ import pytest
 
 from minisweagent.exceptions import FormatError
 from minisweagent.models.litellm_model import LitellmModel, LitellmModelConfig
-from minisweagent.models.utils.actions_toolcall import BASH_TOOL
+from minisweagent.models.utils.actions_toolcall import BASH_TOOL, BASH_TOOL_WITH_REASONING
 
 
 class TestLitellmModelConfig:
@@ -50,6 +50,23 @@ class TestLitellmModel:
 
         mock_completion.assert_called_once()
         assert mock_completion.call_args.kwargs["tools"] == [BASH_TOOL]
+
+    @patch("minisweagent.models.litellm_model.litellm.completion")
+    @patch("minisweagent.models.litellm_model.litellm.cost_calculator.completion_cost")
+    def test_query_includes_reasoning_tool_schema_and_choice(self, mock_cost, mock_completion):
+        tool_call = MagicMock()
+        tool_call.function.name = "bash"
+        tool_call.function.arguments = '{"command": "echo test", "reasoning": "inspect"}'
+        tool_call.id = "call_1"
+        mock_completion.return_value = _mock_litellm_response([tool_call])
+        mock_cost.return_value = 0.001
+
+        model = LitellmModel(model_name="gpt-4", require_reasoning=True, tool_choice="required")
+        model.query([{"role": "user", "content": "test"}])
+
+        mock_completion.assert_called_once()
+        assert mock_completion.call_args.kwargs["tools"] == [BASH_TOOL_WITH_REASONING]
+        assert mock_completion.call_args.kwargs["tool_choice"] == "required"
 
     @patch("minisweagent.models.litellm_model.litellm.completion")
     @patch("minisweagent.models.litellm_model.litellm.cost_calculator.completion_cost")

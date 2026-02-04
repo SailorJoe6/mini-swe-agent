@@ -17,6 +17,7 @@ from jinja2 import StrictUndefined, Template
 from rich.live import Live
 
 from minisweagent import Environment
+from minisweagent.agents import resolve_agent_class
 from minisweagent.agents.default import DefaultAgent
 from minisweagent.config import builtin_config_dir, get_config_from_spec
 from minisweagent.environments import get_environment
@@ -76,6 +77,25 @@ class ProgressTrackingAgent(DefaultAgent):
         """Override step to provide progress updates."""
         self.progress_manager.update_instance_status(self.instance_id, f"Step {self.n_calls + 1:3d} (${self.cost:.2f})")
         return super().step()
+
+
+def _wrap_with_progress(agent_class: type) -> type:
+    if issubclass(agent_class, ProgressTrackingAgent):
+        return agent_class
+
+    class ProgressAgent(agent_class):
+        def __init__(self, *args, progress_manager: RunBatchProgressManager, instance_id: str = "", **kwargs):
+            super().__init__(*args, **kwargs)
+            self.progress_manager: RunBatchProgressManager = progress_manager
+            self.instance_id = instance_id
+
+        def step(self) -> dict:
+            self.progress_manager.update_instance_status(
+                self.instance_id, f"Step {self.n_calls + 1:3d} (${self.cost:.2f})"
+            )
+            return super().step()
+
+    return ProgressAgent
 
 
 def get_swebench_docker_image_name(instance: dict) -> str:
@@ -162,12 +182,16 @@ def process_instance(
 
     try:
         env = get_sb_environment(config, instance)
-        agent = ProgressTrackingAgent(
+        agent_config = dict(config.get("agent", {}))
+        agent_class_spec = agent_config.pop("agent_class", None)
+        base_agent_class = resolve_agent_class(agent_class_spec, default=ProgressTrackingAgent)
+        agent_class = _wrap_with_progress(base_agent_class)
+        agent = agent_class(
             model,
             env,
             progress_manager=progress_manager,
             instance_id=instance_id,
-            **config.get("agent", {}),
+            **agent_config,
         )
         agent.set_live_trajectory_path(live_traj_path)
         info = agent.run(task)

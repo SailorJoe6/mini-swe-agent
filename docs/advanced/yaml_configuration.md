@@ -32,6 +32,11 @@ You can find the full list of options in the [API reference](../reference/agents
 To use a different agent class, you can set the `agent_class` key to the name of the agent class you want to use
 or even to an import path (to use your own custom agent class even if it is not yet part of the mini-SWE-agent package).
 
+!!! note
+
+    For SWE-bench runs that need a tool-call-only agent (with required tool-call reasoning),
+    see the `swebench_toolcall_only.yaml` config referenced in the [SWE-bench usage guide](../usage/swebench.md).
+
 ### Prompt templates
 
 We use [Jinja2](https://jinja.palletsprojects.com/) to render templates (e.g., the instance template).
