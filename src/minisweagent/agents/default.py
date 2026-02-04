@@ -169,6 +169,9 @@ class DefaultAgent:
             return
         model_name = getattr(self.model, "config", None)
         model_name = getattr(model_name, "model_name", None)
+        if not model_name or not isinstance(model_name, str):
+            return
+        model_name = model_name.strip()
         if not model_name:
             return
         context_map = load_context_window_map()
