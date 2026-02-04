@@ -5,7 +5,7 @@ import pytest
 
 from minisweagent import package_dir
 from minisweagent.models.test_models import DeterministicModel, make_output
-from minisweagent.run.benchmarks.swebench_single import main
+from minisweagent.run.benchmarks.swebench_single import _get_live_trajectory_path, main
 
 
 def _make_model_from_fixture(text_outputs: list[str], cost_per_call: float = 1.0, **kwargs) -> DeterministicModel:
@@ -54,6 +54,9 @@ def test_swebench_single_end_to_end(github_test_data, tmp_path):
         # Verify model was called with correct parameters
         mock_get_model.assert_called_once()
         assert output_path.exists()
+        live_path = _get_live_trajectory_path(output_path)
+        assert live_path.exists()
+        assert live_path.read_text().strip()
 
 
 @pytest.mark.slow
@@ -89,3 +92,6 @@ def test_swebench_single_end_to_end_exit_immediately(github_test_data, tmp_path)
         # Verify model was called with correct parameters
         mock_get_model.assert_called_once()
         assert output_path.exists()
+        live_path = _get_live_trajectory_path(output_path)
+        assert live_path.exists()
+        assert live_path.read_text().strip()

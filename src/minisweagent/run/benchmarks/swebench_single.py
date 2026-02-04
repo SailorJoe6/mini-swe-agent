@@ -38,6 +38,17 @@ Examples:
 """
 
 
+def _get_live_trajectory_path(output_path: Path) -> Path:
+    filename = output_path.name
+    if filename.endswith(".traj.json"):
+        filename = filename[: -len(".traj.json")] + ".traj.jsonl"
+    elif output_path.suffix:
+        filename = output_path.with_suffix(".jsonl").name
+    else:
+        filename = f"{filename}.traj.jsonl"
+    return output_path.with_name(filename)
+
+
 # fmt: off
 @app.command()
 def main(
@@ -83,6 +94,7 @@ def main(
         env,
         **config.get("agent", {}),
     )
+    agent.set_live_trajectory_path(_get_live_trajectory_path(output))
     agent.run(instance["problem_statement"])
 
 

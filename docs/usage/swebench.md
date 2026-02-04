@@ -98,6 +98,9 @@
         - `-m`, `--model` - Model to use
         - `-c`, `--config` - Path to a config file (default: `swebench.yaml` in the `config` directory)
         - `-o`, `--output` - Output trajectory file (default: saves to global config directory)
+        - Live JSONL stream is written next to the output file:
+          - `*.traj.json` -> `*.traj.jsonl`
+          - `*.json` -> `*.jsonl`
 
         Data selection flags:
 
