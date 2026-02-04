@@ -80,6 +80,18 @@ To register extra models to litellm (see [local models](../models/local_models.m
 LITELLM_MODEL_REGISTRY_PATH="/path/to/your/model/registry.json"
 ```
 
+### Context window map
+
+mini-swe-agent maintains a context window map used to resolve model limits for prompts and UI hints.
+On first use, a seeded map is copied into your global config directory so you can edit it:
+
+```
+<global_config_dir>/model_context_windows.yaml
+```
+
+Entries are normalized by model name (provider prefixes, date suffixes, preview/beta/latest, and quantization
+suffixes are stripped). You can add or update entries to reflect local model limits.
+
 ### Streaming settings (LiteLLM)
 
 ```bash

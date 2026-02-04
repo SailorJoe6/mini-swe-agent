@@ -423,3 +423,41 @@ def test_empty_actions_handling(model_factory):
     assert info["exit_status"] == "Submitted"
     assert info["submission"] == "done\n"
     assert agent.n_calls == 2
+
+
+def test_context_window_tracking_sets_context_left_percent(default_config):
+    class _UsageModel:
+        def __init__(self):
+            self.config = type("Config", (), {"model_name": "gpt-4o"})()
+
+        def query(self, messages, **kwargs):
+            return {
+                "role": "assistant",
+                "content": "ok",
+                "extra": {
+                    "actions": [],
+                    "cost": 0.0,
+                    "timestamp": 0.0,
+                    "response": {"usage": {"prompt_tokens": 6400, "completion_tokens": 128, "total_tokens": 6528}},
+                },
+            }
+
+        def format_message(self, **kwargs):
+            return kwargs
+
+        def format_observation_messages(self, message, outputs, template_vars=None):
+            return []
+
+        def get_template_vars(self, **kwargs):
+            return {"model_name": "gpt-4o"}
+
+        def serialize(self):
+            return {}
+
+    agent = DefaultAgent(model=_UsageModel(), env=LocalEnvironment(), **default_config)
+    agent.add_messages({"role": "system", "content": "system"}, {"role": "user", "content": "user"})
+    message = agent.query()
+    assert agent.context_window_max == 128000
+    assert agent.context_window_prompt_tokens == 6400
+    assert agent.context_left_percent == 95
+    assert message["context_left_percent"] == 95

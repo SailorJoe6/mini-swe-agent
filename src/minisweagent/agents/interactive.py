@@ -48,10 +48,26 @@ def _multiline_prompt() -> str:
 
 class InteractiveAgent(DefaultAgent):
     _MODE_COMMANDS_MAPPING = {"/u": "human", "/c": "confirm", "/y": "yolo"}
+    context_window_mode = "interactive"
 
     def __init__(self, *args, config_class=InteractiveAgentConfig, **kwargs):
         super().__init__(*args, config_class=config_class, **kwargs)
         self.cost_last_confirmed = 0.0
+
+    def _prompt_for_context_window(self, model_name: str) -> int | None:
+        prompt = (
+            f"[bold yellow]Context window not found for[/bold yellow] [bold green]{model_name}[/bold green].\n"
+            "Enter max tokens (or press Enter to skip):\n"
+            "[bold yellow]>[/bold yellow] "
+        )
+        response = self._prompt_and_handle_slash_commands(prompt).strip()
+        if not response:
+            return None
+        try:
+            return int(response)
+        except ValueError:
+            console.print("[bold red]Invalid integer value. Skipping context window update.[/bold red]")
+            return None
 
     def add_messages(self, *messages: dict) -> list[dict]:
         # Extend supermethod to print messages

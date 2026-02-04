@@ -12,6 +12,12 @@ from pydantic import BaseModel
 
 from minisweagent import Environment, Model, __version__
 from minisweagent.exceptions import InterruptAgentFlow, LimitsExceeded
+from minisweagent.models.context_window import (
+    load_context_window_map,
+    lookup_context_window,
+    normalize_model_name,
+    update_context_window_map,
+)
 from minisweagent.utils.serialize import recursive_merge, to_jsonable
 
 
@@ -31,6 +37,8 @@ class AgentConfig(BaseModel):
 
 
 class DefaultAgent:
+    context_window_mode = "auto"
+
     def __init__(self, model: Model, env: Environment, *, config_class: type = AgentConfig, **kwargs):
         """See the `AgentConfig` class for permitted keyword arguments."""
         self.config = config_class(**kwargs)
@@ -42,6 +50,9 @@ class DefaultAgent:
         self.cost = 0.0
         self.n_calls = 0
         self._live_trajectory_path: Path | None = None
+        self.context_window_max: int | None = None
+        self.context_window_prompt_tokens: int | None = None
+        self.context_left_percent: int | None = None
 
     def set_live_trajectory_path(self, path: Path | None) -> None:
         """Set a live JSONL trajectory path and clear any existing file."""
@@ -59,7 +70,13 @@ class DefaultAgent:
             self.config.model_dump(),
             self.env.get_template_vars(),
             self.model.get_template_vars(),
-            {"n_model_calls": self.n_calls, "model_cost": self.cost},
+            {
+                "n_model_calls": self.n_calls,
+                "model_cost": self.cost,
+                "context_window_max": self.context_window_max,
+                "context_window_prompt_tokens": self.context_window_prompt_tokens,
+                "context_left_percent": self.context_left_percent,
+            },
             self.extra_template_vars,
             kwargs,
         )
@@ -100,6 +117,7 @@ class DefaultAgent:
         """Run step() until agent is finished. Returns dictionary with exit_status, submission keys."""
         self.extra_template_vars |= {"task": task, **kwargs}
         self.messages = []
+        self._resolve_context_window_max()
         self.add_messages(
             self.model.format_message(role="system", content=self._render_template(self.config.system_template)),
             self.model.format_message(role="user", content=self._render_template(self.config.instance_template)),
@@ -132,8 +150,11 @@ class DefaultAgent:
                     "extra": {"exit_status": "LimitsExceeded", "submission": ""},
                 }
             )
+        if self.context_window_max is None:
+            self._resolve_context_window_max()
         self.n_calls += 1
         message = self.model.query(self.messages)
+        self._update_context_window_stats(message)
         self.cost += message.get("extra", {}).get("cost", 0.0)
         self.add_messages(message)
         return message
@@ -142,6 +163,58 @@ class DefaultAgent:
         """Execute actions in message, add observation messages, return them."""
         outputs = [self.env.execute(action) for action in message.get("extra", {}).get("actions", [])]
         return self.add_messages(*self.model.format_observation_messages(message, outputs, self.get_template_vars()))
+
+    def _resolve_context_window_max(self) -> None:
+        if self.context_window_max is not None:
+            return
+        model_name = getattr(self.model, "config", None)
+        model_name = getattr(model_name, "model_name", None)
+        if not model_name:
+            return
+        context_map = load_context_window_map()
+        resolved = lookup_context_window(model_name, context_map)
+        normalized_name = normalize_model_name(model_name)
+        normalized_keys = {normalize_model_name(key) for key in context_map}
+        if resolved is None and self.context_window_mode == "interactive":
+            resolved = self._prompt_for_context_window(model_name)
+            if resolved is not None:
+                update_context_window_map(model_name, resolved)
+        if resolved is not None:
+            self.context_window_max = int(resolved)
+            if normalized_name not in normalized_keys:
+                update_context_window_map(model_name, resolved)
+
+    def _prompt_for_context_window(self, model_name: str) -> int | None:
+        return None
+
+    def _update_context_window_stats(self, message: dict) -> None:
+        prompt_tokens = self._extract_prompt_tokens(message)
+        if prompt_tokens is None:
+            return
+        self.context_window_prompt_tokens = prompt_tokens
+        if not self.context_window_max:
+            return
+        left = int(100 * (1 - (prompt_tokens / self.context_window_max)))
+        self.context_left_percent = max(0, min(100, left))
+        message["context_left_percent"] = self.context_left_percent
+
+    @staticmethod
+    def _extract_prompt_tokens(message: dict) -> int | None:
+        usage = None
+        extra = message.get("extra") or {}
+        response = extra.get("response")
+        if response and isinstance(response, dict):
+            usage = response.get("usage")
+        if usage is None and isinstance(message.get("usage"), dict):
+            usage = message.get("usage")
+        if usage is None and hasattr(message.get("usage"), "model_dump"):
+            usage = message["usage"].model_dump()
+        if usage is None and hasattr(message.get("usage"), "__dict__"):
+            usage = message["usage"].__dict__
+        if not isinstance(usage, dict):
+            return None
+        prompt_tokens = usage.get("prompt_tokens")
+        return prompt_tokens if isinstance(prompt_tokens, int) else None
 
     def serialize(self, *extra_dicts) -> dict:
         """Serialize agent state to a json-compatible nested dictionary for saving."""

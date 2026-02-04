@@ -11,6 +11,7 @@ from minisweagent.models.utils.actions_toolcall_response import (
     format_toolcall_observation_messages,
     parse_toolcall_actions_response,
 )
+from minisweagent.models.utils.openai_utils import coerce_responses_text
 from minisweagent.models.utils.retry import retry
 
 logger = logging.getLogger("litellm_response_model")
@@ -23,6 +24,7 @@ class LitellmResponseModelConfig(LitellmModelConfig):
 class LitellmResponseModel(LitellmModel):
     def __init__(self, *, config_class: Callable = LitellmResponseModelConfig, **kwargs):
         super().__init__(config_class=config_class, **kwargs)
+        self._previous_response_id: str | None = None
 
     def _prepare_messages_for_api(self, messages: list[dict]) -> list[dict]:
         """Flatten response objects into their output items for stateless API calls."""
@@ -37,11 +39,14 @@ class LitellmResponseModel(LitellmModel):
 
     def _query(self, messages: list[dict[str, str]], **kwargs):
         try:
+            request_kwargs = self.config.model_kwargs | kwargs
+            if self._previous_response_id:
+                request_kwargs.setdefault("previous_response_id", self._previous_response_id)
             return litellm.responses(
                 model=self.config.model_name,
                 input=messages,
                 tools=[BASH_TOOL_RESPONSE_API],
-                **(self.config.model_kwargs | kwargs),
+                **request_kwargs,
             )
         except litellm.exceptions.AuthenticationError as e:
             e.message += " You can permanently set your API key with `mini-extra config set KEY VALUE`."
@@ -54,6 +59,13 @@ class LitellmResponseModel(LitellmModel):
         cost_output = self._calculate_cost(response)
         GLOBAL_MODEL_STATS.add(cost_output["cost"])
         message = response.model_dump() if hasattr(response, "model_dump") else dict(response)
+        response_id = message.get("id")
+        if response_id:
+            self._previous_response_id = response_id
+        output_items = message.get("output", [])
+        content = coerce_responses_text(output_items)
+        if content:
+            message["content"] = content
         message["extra"] = {
             "actions": self._parse_actions(response),
             **cost_output,

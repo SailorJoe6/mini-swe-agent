@@ -180,7 +180,7 @@ class LitellmModel:
             return False
         for key in ("prompt_tokens", "completion_tokens"):
             value = usage.get(key)
-            if not isinstance(value, int) or value < 0:
+            if not isinstance(value, int) or value <= 0:
                 return False
         return True
 

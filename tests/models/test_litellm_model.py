@@ -149,6 +149,40 @@ class TestLitellmModel:
 
     @patch("minisweagent.models.litellm_model.litellm.completion")
     @patch("minisweagent.models.litellm_model.litellm.cost_calculator.completion_cost")
+    def test_query_streaming_falls_back_on_zero_usage(self, mock_cost, mock_completion):
+        tool_call_delta = {
+            "index": 0,
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "bash", "arguments": '{"command": "echo test"}'},
+        }
+        stream = iter(
+            [
+                _make_stream_chunk(
+                    content="Hello",
+                    tool_calls=[tool_call_delta],
+                    usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    finish_reason="stop",
+                )
+            ]
+        )
+        tool_call = MagicMock()
+        tool_call.function.name = "bash"
+        tool_call.function.arguments = '{"command": "ls -la"}'
+        tool_call.id = "call_abc"
+        mock_completion.side_effect = [stream, _mock_litellm_response([tool_call])]
+        mock_cost.return_value = 0.001
+
+        model = LitellmModel(model_name="gpt-4", use_streaming=True)
+        result = model.query([{"role": "user", "content": "test"}])
+
+        assert mock_completion.call_count == 2
+        assert mock_completion.call_args_list[0].kwargs["stream"] is True
+        assert mock_completion.call_args_list[1].kwargs.get("stream") is None
+        assert result["extra"]["actions"] == [{"command": "ls -la", "tool_call_id": "call_abc"}]
+
+    @patch("minisweagent.models.litellm_model.litellm.completion")
+    @patch("minisweagent.models.litellm_model.litellm.cost_calculator.completion_cost")
     def test_stream_guard_truncates_repeated_closing_tags(self, mock_cost, mock_completion, caplog):
         tool_call_delta = {
             "index": 0,
